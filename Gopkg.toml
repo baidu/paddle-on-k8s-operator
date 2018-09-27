@@ -1,0 +1,35 @@
+[prune]
+  go-tests = true
+  unused-packages = true
+
+[[constraint]]
+    name = "github.com/wangkuiyi/candy"
+    branch = "master"
+
+[[constraint]]
+    name = "k8s.io/client-go"
+    version = "v5.0.0"
+
+[[constraint]]
+    name = "k8s.io/kubernetes"
+    version = "v1.8.12"
+
+[[constraint]]
+    name = "k8s.io/apimachinery"
+    version = "kubernetes-1.8.12"
+
+[[constraint]]
+    name = "k8s.io/api"
+    version = "kubernetes-1.8.12"
+
+[[override]]
+    name = "k8s.io/code-generator"
+    version = "kubernetes-1.8.12"
+
+[[constraint]]
+    name = "k8s.io/apiextensions-apiserver"
+    version = "kubernetes-1.8.12"
+
+[[constraint]]
+    name = "github.com/inconshreveable/log15"
+    version = "v2.13"
