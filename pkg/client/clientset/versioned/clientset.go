@@ -15,8 +15,8 @@ limitations under the License.
 */package versioned
 
 import (
-	glog "github.com/golang/glog"
 	paddlepaddlev1 "github.com/baidu/paddle-on-k8s-operator/pkg/client/clientset/versioned/typed/paddlepaddle/v1"
+	glog "github.com/golang/glog"
 	discovery "k8s.io/client-go/discovery"
 	rest "k8s.io/client-go/rest"
 	flowcontrol "k8s.io/client-go/util/flowcontrol"

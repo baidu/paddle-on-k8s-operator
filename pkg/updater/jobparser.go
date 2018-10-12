@@ -88,15 +88,7 @@ func (p *DefaultJobParser) NewTrainingJob(job *paddlev1.TrainingJob) (*paddlev1.
 // parseToPserver generate a pserver replicaset resource according to "TrainingJob" resource specs.
 func parseToPserver(job *paddlev1.TrainingJob) *v1beta1.ReplicaSet {
 	replicas := int32(job.Spec.Pserver.MinInstance)
-	var command []string
-	// FIXME: refine these part.(typhoonzero)
-	if job.Spec.FaultTolerant {
-		command = []string{"paddle_k8s", "start_new_pserver"}
-	} else {
-		command = []string{"paddle_k8s", "start_pserver"}
-	}
-
-	return &v1beta1.ReplicaSet{
+	spec := &v1beta1.ReplicaSet{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "extensions/v1beta1",
 			APIVersion: "ReplicaSet",
@@ -109,19 +101,18 @@ func parseToPserver(job *paddlev1.TrainingJob) *v1beta1.ReplicaSet {
 			Replicas: &replicas,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{"paddle-job-pserver": job.ObjectMeta.Name},
+					Labels:      map[string]string{"paddle-job-pserver": job.ObjectMeta.Name},
 					Annotations: map[string]string{"scheduling.k8s.io/group-name": job.Spec.PodGroupName},
 				},
 				Spec: corev1.PodSpec{
 					SchedulerName: job.Spec.SchedulerName,
-					Volumes: job.Spec.Volumes,
+					Volumes:       job.Spec.Volumes,
 					Containers: []corev1.Container{
 						corev1.Container{
 							Name:      "pserver",
 							Image:     job.Spec.Image,
 							Ports:     podPorts(job),
 							Env:       podEnv(job),
-							Command:   command,
 							Resources: job.Spec.Pserver.Resources,
 						},
 					},
@@ -129,19 +120,31 @@ func parseToPserver(job *paddlev1.TrainingJob) *v1beta1.ReplicaSet {
 			},
 		},
 	}
+
+	if !job.Spec.Matrix {
+		var command []string
+		entryPoint := job.Spec.Pserver.Entrypoint
+		if len(entryPoint) == 0 {
+			// default start command
+			if job.Spec.FaultTolerant {
+				command = []string{"paddle_k8s", "start_new_pserver"}
+			} else {
+				command = []string{"paddle_k8s", "start_pserver"}
+			}
+		} else {
+			// user-defined start command
+			command = []string{entryPoint}
+		}
+		spec.Spec.Template.Spec.Containers[0].Command = command
+	}
+
+	return spec
 }
 
 // parseToTrainer parse TrainingJob to a kubernetes job resource.
 func parseToTrainer(job *paddlev1.TrainingJob) *batchv1.Job {
 	replicas := int32(job.Spec.Trainer.MinInstance)
-	var command []string
-	if job.Spec.FaultTolerant {
-		command = []string{"paddle_k8s", "start_new_trainer"}
-	} else {
-		command = []string{"paddle_k8s", "start_trainer"}
-	}
-
-	return &batchv1.Job{
+	spec := &batchv1.Job{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "Job",
 			APIVersion: "batch/v1",
@@ -154,18 +157,17 @@ func parseToTrainer(job *paddlev1.TrainingJob) *batchv1.Job {
 			Parallelism: &replicas,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{"paddle-job": job.ObjectMeta.Name},
+					Labels:      map[string]string{"paddle-job": job.ObjectMeta.Name},
 					Annotations: map[string]string{"scheduling.k8s.io/group-name": job.Spec.PodGroupName},
 				},
 				Spec: corev1.PodSpec{
 					SchedulerName: job.Spec.SchedulerName,
-					Volumes: job.Spec.Volumes,
+					Volumes:       job.Spec.Volumes,
 					Containers: []corev1.Container{
 						corev1.Container{
 							Name:            "trainer",
 							Image:           job.Spec.Image,
 							ImagePullPolicy: imagePullPolicy,
-							Command:         command,
 							VolumeMounts:    job.Spec.VolumeMounts,
 							Ports:           podPorts(job),
 							Env:             podEnv(job),
@@ -177,10 +179,28 @@ func parseToTrainer(job *paddlev1.TrainingJob) *batchv1.Job {
 			},
 		},
 	}
+
+	if !job.Spec.Matrix {
+		var command []string
+		entryPoint := job.Spec.Trainer.Entrypoint
+		if len(entryPoint) == 0 {
+			// default start command
+			if job.Spec.FaultTolerant {
+				command = []string{"paddle_k8s", "start_new_trainer"}
+			} else {
+				command = []string{"paddle_k8s", "start_trainer"}
+			}
+		} else {
+			// user-defined start command
+			command = []string{entryPoint}
+		}
+		spec.Spec.Template.Spec.Containers[0].Command = command
+	}
+
+	return spec
 }
 
 func masterResource(job *paddlev1.TrainingJob) *corev1.ResourceRequirements {
-	// TODO(gongwb): config master resource?
 	return &corev1.ResourceRequirements{
 		Limits: corev1.ResourceList{
 			"cpu":    *apiresource.NewQuantity(int64(2), apiresource.DecimalSI),
@@ -206,16 +226,14 @@ func getEtcdPodSpec(job *paddlev1.TrainingJob) *corev1.Container {
 		Name:            "etcd",
 		Image:           "m3ngyang/etcd:v3.2.1",
 		ImagePullPolicy: imagePullPolicy,
-		// TODO(gongwb): etcd ports?
-		Env:     podEnv(job),
-		Command: command,
+		Env:             podEnv(job),
+		Command:         command,
 	}
 }
 
 // parseToMaster parse TrainingJob to a kubernetes replicaset resource.
 func parseToMaster(job *paddlev1.TrainingJob) *v1beta1.ReplicaSet {
 	replicas := int32(1)
-	// FIXME: refine these part.(typhoonzero)
 	command := []string{"paddle_k8s", "start_master"}
 
 	return &v1beta1.ReplicaSet{
@@ -231,12 +249,12 @@ func parseToMaster(job *paddlev1.TrainingJob) *v1beta1.ReplicaSet {
 			Replicas: &replicas,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{"paddle-job-master": job.ObjectMeta.Name},
+					Labels:      map[string]string{"paddle-job-master": job.ObjectMeta.Name},
 					Annotations: map[string]string{"scheduling.k8s.io/group-name": job.Spec.PodGroupName},
 				},
 				Spec: corev1.PodSpec{
 					SchedulerName: job.Spec.SchedulerName,
-					Volumes: job.Spec.Volumes,
+					Volumes:       job.Spec.Volumes,
 					Containers: []corev1.Container{
 						corev1.Container{
 							Name:            "master",

@@ -62,7 +62,10 @@ type TrainingJobSpec struct {
 	Trainer TrainerSpec `json:"trainer"`
 	//Scheduling components.
 	SchedulerName string `json:"schedulerName,omitempty"`
-	PodGroupName string `json:"podGroupName,omitempty"`
+	PodGroupName  string `json:"podGroupName,omitempty"`
+
+	// Matrix field indicates whether the backend container is matrix
+	Matrix bool `json:"matrix"`
 }
 
 // MasterSpec is the spec for a master in the paddle job
@@ -74,6 +77,7 @@ type MasterSpec struct {
 
 // PserverSpec is the spec for pservers in the paddle job
 type PserverSpec struct {
+	Entrypoint  string                      `json:"entrypoint"`
 	MinInstance int                         `json:"min-instance"`
 	MaxInstance int                         `json:"max-instance"`
 	Resources   corev1.ResourceRequirements `json:"resources"`
