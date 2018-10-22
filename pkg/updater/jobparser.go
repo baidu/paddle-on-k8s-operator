@@ -110,8 +110,10 @@ func parseToPserver(job *paddlev1.TrainingJob) *v1beta1.ReplicaSet {
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{"paddle-job-pserver": job.ObjectMeta.Name},
+					Annotations: map[string]string{"scheduling.k8s.io/group-name": job.Spec.PodGroupName},
 				},
 				Spec: corev1.PodSpec{
+					SchedulerName: job.Spec.SchedulerName,
 					Volumes: job.Spec.Volumes,
 					Containers: []corev1.Container{
 						corev1.Container{
@@ -153,8 +155,10 @@ func parseToTrainer(job *paddlev1.TrainingJob) *batchv1.Job {
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{"paddle-job": job.ObjectMeta.Name},
+					Annotations: map[string]string{"scheduling.k8s.io/group-name": job.Spec.PodGroupName},
 				},
 				Spec: corev1.PodSpec{
+					SchedulerName: job.Spec.SchedulerName,
 					Volumes: job.Spec.Volumes,
 					Containers: []corev1.Container{
 						corev1.Container{
@@ -228,8 +232,10 @@ func parseToMaster(job *paddlev1.TrainingJob) *v1beta1.ReplicaSet {
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{"paddle-job-master": job.ObjectMeta.Name},
+					Annotations: map[string]string{"scheduling.k8s.io/group-name": job.Spec.PodGroupName},
 				},
 				Spec: corev1.PodSpec{
+					SchedulerName: job.Spec.SchedulerName,
 					Volumes: job.Spec.Volumes,
 					Containers: []corev1.Container{
 						corev1.Container{

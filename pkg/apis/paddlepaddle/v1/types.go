@@ -60,6 +60,9 @@ type TrainingJobSpec struct {
 	Master  MasterSpec  `json:"master"`
 	Pserver PserverSpec `json:"pserver"`
 	Trainer TrainerSpec `json:"trainer"`
+	//Scheduling components.
+	SchedulerName string `json:"schedulerName,omitempty"`
+	PodGroupName string `json:"podGroupName,omitempty"`
 }
 
 // MasterSpec is the spec for a master in the paddle job
