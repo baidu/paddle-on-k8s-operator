@@ -1,24 +1,33 @@
 # paddle-on-k8s-operator
 
+## Prerequisites
+
+* Kubernetes Version 1.8+.
+
+Paddle on Kubernetes Operator relies on CRD and garbage collection which are supported in Kubernetes 1.8+.
+
 ## Get Started
 
-We use `dep` for dependency management, to compile the project:
+For install and use operator, please checkout [Quick Start Guide](docs/quick-start-guide.md).
 
-```
-dep ensure -v
+For detailed information of how to use operator, please check out [User Guide](docs/user-guide.md).
 
-cd ./cmd/operator
+For detailed design documentation, please check out [Design](docs/design.md).
 
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build
+For detailed api specifications, please check out [Api](docs/api.md).
 
-./operator -kubeconfig ~/.kube/config -autoclean
+## Overview
 
-```
+The Paddle Operator tries to run PaddlePaddle training job as native as other workloads on Kubernetes. It relies on CRD for specifying the PaddlePaddle training job.
 
-You can have a quick start by using `example/examplejob.yaml`.
+Features including:
 
-You can also try to use new gang-scheduling mode to schedule your trainingjob, first you can follow [this link](https://github.com/kubernetes-sigs/kube-batch/blob/master/doc/usage/tutorial.md) to start up the kube-batch in helm, and then try `example/examplejob_with_kube_batch.yaml`.
+* Paddle training job instance auto scaling according to resource utilization
+* Paddle training job instance fault tolerant
 
+## Contributing
+
+For contributing to this project, please check out [CONTRIBUTING](CONTRIBUTING.md) first, then check out [Developer Guide](docs/developer-guide.md).
 
 ## License
 

@@ -1,7 +1,7 @@
 apiVersion: paddlepaddle.org/v1
 kind: TrainingJob
 metadata:
-  name: paddle-example1
+  name: example-job-with-kube-batch
   namespace: default
 spec:
   #paddle image with training script
