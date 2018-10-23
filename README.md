@@ -8,7 +8,7 @@ Paddle on Kubernetes Operator relies on CRD and garbage collection which are sup
 
 ## Get Started
 
-For install and use operator, please checkout [Quick Start Guide](docs/quick-start-guide.md).
+For operator installation and usage, please checkout [Quick Start Guide](docs/quick-start-guide.md).
 
 For detailed information of how to use operator, please check out [User Guide](docs/user-guide.md).
 
