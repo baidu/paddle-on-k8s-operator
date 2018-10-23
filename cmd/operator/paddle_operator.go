@@ -34,14 +34,30 @@ var (
 func main() {
 	masterURL := flag.String("master", "", "Address of a kube master.")
 	kubeConfig := flag.String("kubeconfig", "", "Path to a kube config. Only required if out-of-cluster.")
-	autoClean := flag.Bool("autoclean", false, "Auto clean pods after terminating job, default false")
+	autoClean := flag.Bool("autoclean", false, "Auto clean pods after terminating job, default false.")
 	maxLoadDesired := flag.Float64("max_load_desired", 0.97, `Keep the cluster max resource usage around
 		this value, jobs will scale down if total request is over this level.`)
+	restartLimit := flag.Int("restartlimit", 5, "Pserver pull image error limit.")
+	inCluster := flag.Bool("incluster", false, "Controller runs in cluster or out of cluster.")
+	logLevel := flag.Int("loglevel", 4, "Log level of operator.")
+	outter := flag.Bool("outter", false, "If this is a opensource version.")
+
 	flag.Parse()
 
 	stopCh := signals.SetupSignalHandler()
+	handler := log.LvlFilterHandler(log.Lvl(*logLevel), log.StdoutHandler)
+	log.Root().SetHandler(handler)
 
-	cfg, err := clientcmd.BuildConfigFromFlags(*masterURL, *kubeConfig)
+	//cfg, err := clientcmd.BuildConfigFromFlags(*masterURL, *kubeConfig)
+	var cfg *rest.Config = nil
+	var err error = nil
+
+	if *inCluster {
+		cfg, err = rest.InClusterConfig()
+	} else {
+		cfg, err = clientcmd.BuildConfigFromFlags(*masterURL, *kubeConfig)
+	}
+
 	candy.Must(err)
 
 	kubeClient, err := kubernetes.NewForConfig(cfg)
@@ -59,7 +75,8 @@ func main() {
 	run := func(stop <-chan struct{}) {
 		log.Info("I won the leader election", "hostname", hostname)
 		paddleInformer := paddleinformers.NewSharedInformerFactory(paddleClient, time.Second*10)
-		controller := paddlecontroller.New(kubeClient, extapiClient, paddleClient, paddleInformer, *autoClean)
+		controller := paddlecontroller.New(kubeClient, extapiClient, paddleClient, paddleInformer, *autoClean,
+			*restartLimit, *outter)
 		go paddleInformer.Start(stopCh)
 
 		if controller.Run(1, *maxLoadDesired, stopCh); err != nil {

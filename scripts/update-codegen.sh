@@ -32,7 +32,7 @@ echo ${CODEGEN_PKG}
 #                  instead of the $GOPATH directly. For normal projects this can be dropped.
 ${CODEGEN_PKG}/generate-groups.sh "deepcopy,client,informer,lister" \
  github.com/baidu/paddle-on-k8s-operator/pkg/client github.com/baidu/paddle-on-k8s-operator/pkg/apis \
-  paddlepaddle:v1 \
+  paddlepaddle:v1alpha1 \
   --go-header-file ${SCRIPT_ROOT}/scripts/custom-boilerplate.go.txt
 
 ## format codes

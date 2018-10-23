@@ -4,6 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strconv"
+	"time"
+	"strings"
 
 	log "github.com/inconshreveable/log15"
 	corev1 "k8s.io/api/core/v1"
@@ -15,7 +18,7 @@ import (
 	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/record"
 
-	paddlev1 "github.com/baidu/paddle-on-k8s-operator/pkg/apis/paddlepaddle/v1"
+	paddlev1 "github.com/baidu/paddle-on-k8s-operator/pkg/apis/paddlepaddle/v1alpha1"
 	trainingJobClient "github.com/baidu/paddle-on-k8s-operator/pkg/client/clientset/versioned"
 	"github.com/baidu/paddle-on-k8s-operator/pkg/client/clientset/versioned/scheme"
 )
@@ -34,10 +37,13 @@ type JobUpdater struct {
 	recorder       record.EventRecorder
 	autoclean      bool
 	Additional     int32
+	restartLimit   int
+	outter         bool
 }
 
 // NewJobUpdater returns JobUpdater instance
-func NewJobUpdater(job *paddlev1.TrainingJob, kubeCli kubernetes.Interface, jobCli trainingJobClient.Interface, auto bool) *JobUpdater {
+func NewJobUpdater(job *paddlev1.TrainingJob, kubeCli kubernetes.Interface, jobCli trainingJobClient.Interface,
+	auto bool, restartLimit int, outter bool) *JobUpdater {
 	eventBroadcaster := record.NewBroadcaster()
 	eventBroadcaster.StartLogging(log.Info)
 	eventBroadcaster.StartRecordingToSink(&typedcorev1.EventSinkImpl{Interface: kubeCli.CoreV1().Events("")})
@@ -50,6 +56,8 @@ func NewJobUpdater(job *paddlev1.TrainingJob, kubeCli kubernetes.Interface, jobC
 		status:         *job.Status.DeepCopy(),
 		recorder:       recorder,
 		autoclean:      auto,
+		restartLimit:   restartLimit,
+		outter:         outter,
 	}
 }
 
@@ -141,6 +149,11 @@ func (j *JobUpdater) Reconcile() error {
 		j.status.Phase = phase
 		j.status.Reason = reason
 
+		if phase == paddlev1.TrainingJobPhaseRunning {
+			j.Job.StartTime = time.Now()
+			log.Info("Job started", "job", j.FullName(), "time", j.Job.StartTime.Format("2018-01-01 23:00:00"))
+		}
+
 		if err := j.updateCRDStatus(); err != nil {
 			log.Error("Error updating TrainingJob", "job", j.FullName(), "err", err.Error())
 			return err
@@ -148,16 +161,32 @@ func (j *JobUpdater) Reconcile() error {
 	}
 
 	if j.Job.Status.Phase == paddlev1.TrainingJobPhaseRunning {
+
+		if !j.Job.Spec.Trainer.IndexSucceed {
+			success, err := j.addLabelToPods()
+			if err == nil && success {
+				j.Job.Spec.Trainer.IndexSucceed = true
+			} else {
+				log.Error("Add label to pods failed")
+			}
+
+		}
+
+		err := j.traceAddLabelToPods()
+		if err != nil {
+			log.Error("Trace pod label to pods failed")
+		}
+
 		phase, reason, err := j.GetStatus()
 		if err != nil {
-			log.Error("Error get TrainingJob", "job", j.FullName(), "err", err.Error())
+			log.Error("Get trainingjob error", "job", j.FullName(), "err", err.Error())
 			return err
 		}
 
 		j.status.Phase = phase
 		j.status.Reason = reason
 		if err := j.updateCRDStatus(); err != nil {
-			log.Error("Error updating TrainingJob", "job", j.FullName(), "err", err.Error())
+			log.Error("Update trainingjob error", "job", j.FullName(), "err", err.Error())
 			return err
 		}
 	}
@@ -186,7 +215,8 @@ func (j *JobUpdater) Reconcile() error {
 	}
 
 	if j.Job.Status.Phase == paddlev1.TrainingJobPhaseSucceeded ||
-		j.Job.Status.Phase == paddlev1.TrainingJobPhaseFailed {
+		j.Job.Status.Phase == paddlev1.TrainingJobPhaseFailed ||
+		j.Job.Status.Phase == paddlev1.TrainingJobPhaseTimeout {
 		if j.autoclean {
 			log.Info("Releasing TrainingJob resource", "job", j.FullName(), "current status phase", j.Job.Status.Phase)
 			if err := j.releaseTrainer(); err != nil {
@@ -207,6 +237,32 @@ func (j *JobUpdater) Reconcile() error {
 		}
 	}
 
+	podsList, err := j.kubeCli.CoreV1().Pods(j.Job.Namespace).List(v1.
+	ListOptions{LabelSelector: "paddle-job-pserver=" + j.
+		Job.Name})
+	if err != nil {
+		return err
+	}
+	log.Info("Searching trainingJob", j.FullName())
+findFailedPserver:
+	for _, pod := range podsList.Items {
+		if j.Job.Spec.Pserver.ReplicaSpec == nil ||
+			!strings.Contains(pod.GetNamespace()+"/"+pod.GetName(), j.pserverName()) {
+			continue
+		}
+		log.Info("Find trainingJob", "job", j.FullName())
+		for _, pod := range pod.Status.ContainerStatuses {
+			log.Info("Current time: %d, limit: %d", pod.RestartCount, j.restartLimit)
+			if pod.RestartCount < int32(j.restartLimit) {
+				continue
+			}
+
+			j.status.Phase = paddlev1.TrainingJobPhaseFailed
+			j.status.Reason = "Pserver reached to restart limit!"
+			break findFailedPserver
+		}
+	}
+
 	if err := j.updateCRDStatus(); err != nil {
 		log.Error("Error updating TrainingJob", "job", j.FullName(), "err", err.Error())
 		return err
@@ -216,27 +272,54 @@ func (j *JobUpdater) Reconcile() error {
 }
 
 func (j *JobUpdater) setup() error {
-	var parser DefaultJobParser
-	var err error
-	j.Job, err = parser.NewTrainingJob(j.Job)
+
+	if j.outter {
+		var parser DefaultJobParser
+		var err error
+		j.Job, err = parser.NewTrainingJob(j.Job)
+		if err != nil {
+			log.Error("Error settting up", "job", j.FullName(), "err", err.Error())
+		}
+
+		return err
+	}
+	err := func() error {
+		var parser DefaultJobParser
+		err := parser.Validate(j.Job)
+		if err != nil {
+			log.Error("Validating error", "error", err.Error())
+			return err
+		}
+
+		extEnv, err := parser.GetExtraEnv(j.Job, j.kubeCli)
+		if err != nil {
+			log.Error("Getting extra env failed", "error", err.Error())
+			return err
+		}
+
+		j.Job = parser.ParseToTrainingJob(j.Job, extEnv)
+		return nil
+	}()
+
 	if err != nil {
-		log.Error("error settting up", "job", j.FullName(), "err", err.Error())
+		log.Error("Error settting up", "name", j.FullName(), "error", err.Error())
 	}
 
 	return err
 }
 
 func (j *JobUpdater) updateCRDStatus() error {
-	log.Debug("updating TrainingJob status", "job", j.FullName(), "former status", j.Job.Status, "current status", j.status)
+	log.Debug("Updating TrainingJob status", "job", j.FullName(), "former status", j.Job.Status, "current status",
+		j.status)
 	if reflect.DeepEqual(j.status, j.Job.Status) {
-		log.Debug("update TrainingJob skipped", "job", j.FullName(), "status", j.status)
+		log.Debug("Update TrainingJob skipped", "job", j.FullName(), "status", j.status)
 		return nil
 	}
 
 	newJob := j.Job
 	newJob.Status = j.status
 	// sync trainingjob to apiserver
-	newJob, err := j.trainingJobCli.PaddlepaddleV1().TrainingJobs(j.Job.Namespace).Update(newJob)
+	newJob, err := j.trainingJobCli.PaddlepaddleV1alpha1().TrainingJobs(j.Job.Namespace).Update(newJob)
 	if err != nil {
 		return err
 	}
@@ -275,7 +358,6 @@ func (j *JobUpdater) GetStatus() (paddlev1.TrainingJobPhase, string, error) {
 		} else if trainers.Status.Succeeded == total && trainers.Status.Active == 0 {
 			phase = paddlev1.TrainingJobPhaseSucceeded
 			reason = "all trainer instances have done"
-			return phase, reason, nil
 		}
 	} else {
 		if trainers.Status.Failed != 0 {
@@ -290,7 +372,8 @@ func (j *JobUpdater) GetStatus() (paddlev1.TrainingJobPhase, string, error) {
 			for _, pod := range failedPods {
 				podNameList = append(podNameList, pod.Name)
 				podNodeList = append(podNodeList, pod.Status.HostIP)
-				podReasonList = append(podReasonList, pod.Status.Reason)
+				podReasonList = append(podReasonList, fmt.Sprint(pod.Status.ContainerStatuses[0].State))
+
 			}
 
 			phase = paddlev1.TrainingJobPhaseFailed
@@ -298,11 +381,21 @@ func (j *JobUpdater) GetStatus() (paddlev1.TrainingJobPhase, string, error) {
 			podFailReason := fmt.Sprintf("trainer instances %s on %s have failed, detailed reasons: %s", podNameList,
 				podNodeList, podReasonList)
 			j.recorder.Event(j.Job, corev1.EventTypeWarning, "Pods Failed", podFailReason)
-			return phase, reason, nil
 		} else if trainers.Status.Succeeded == total && trainers.Status.Active == 0 {
 			phase = paddlev1.TrainingJobPhaseSucceeded
 			reason = "all trainer instances have done"
-			return phase, reason, nil
+		}
+	}
+
+	timeLimit := int64(j.Job.Spec.Annotations.Walltime)
+	currentTime := time.Now()
+	if timeLimit != 0 && trainers.Status.Active != 0 && !j.Job.StartTime.IsZero() {
+		if int64((currentTime.Sub(j.Job.StartTime)).Seconds()) > timeLimit {
+			phase = paddlev1.TrainingJobPhaseTimeout
+			reason = "timeout!"
+			log.Warn("Job started", "job", j.Job.Name, "start time",
+				j.Job.StartTime.Format("2018-01-01 23:00:00"), "current time",
+				currentTime.Format("2018-01-01 23:00:00"), "timeLimit", timeLimit)
 		}
 	}
 
@@ -315,16 +408,26 @@ func (j *JobUpdater) GetStatus() (paddlev1.TrainingJobPhase, string, error) {
 }
 
 func (j *JobUpdater) createTrainingJob() error {
+
+	var frameWork *paddlev1.Framework = nil
+
+	if j.Job.Spec.FrameWork != nil {
+		frameWork = j.Job.Spec.FrameWork
+	}
+
 	if j.Job.Spec.FaultTolerant {
-		log.Debug("creating master", "name", j.masterName())
+		log.Debug("Creating master", "name", j.masterName())
 		if err := j.createResource(paddlev1.MASTER); err != nil {
 			return err
 		}
 	}
 
-	log.Debug("creatint pserver", "name", j.pserverName())
-	if err := j.createResource(paddlev1.PSERVER); err != nil {
-		return err
+	if frameWork == nil && !j.Job.Spec.LocalJob && !j.Job.Spec.IsNccl ||
+		frameWork != nil && frameWork.Type == paddlev1.Multi {
+		log.Debug("Creating pserver", "name", j.pserverName())
+		if err := j.createResource(paddlev1.PSERVER); err != nil {
+			return err
+		}
 	}
 
 	log.Debug("creating trainer", "name", j.trainerName())
@@ -349,17 +452,18 @@ func (j *JobUpdater) createResource(rt paddlev1.TrainingResourceType) error {
 	if _, err := j.kubeCli.ExtensionsV1beta1().ReplicaSets(resource.Namespace).Get(resource.Name, v1.GetOptions{}); err != nil {
 		if apierrors.IsNotFound(err) {
 			if _, err := j.kubeCli.ExtensionsV1beta1().ReplicaSets(resource.Namespace).Create(resource); err != nil {
-				log.Error("error creating resource", "namespace", resource.Namespace, "name", resource.Name, "err", err.Error())
+				log.Error("Error creating resource", "namespace", resource.Namespace, "name", resource.Name, "err",
+					err.Error())
 				return err
 			}
-			log.Debug("finish creating resource", "namespace", resource.Namespace, "name", resource.Name)
+			log.Debug("Finish creating resource", "namespace", resource.Namespace, "name", resource.Name)
 			return nil
 		}
-		log.Error("error getting resource", "namespace", resource.Namespace, "name", resource.Name, "err", err.Error())
+		log.Error("Drror getting resource", "namespace", resource.Namespace, "name", resource.Name, "err", err.Error())
 		return err
 	}
 
-	log.Debug("resource already existing, skipping", "namespace", resource.Namespace, "name", resource.Name)
+	log.Debug("Resource already existing, skipping", "namespace", resource.Namespace, "name", resource.Name)
 	return nil
 }
 
@@ -367,21 +471,28 @@ func (j *JobUpdater) createTrainer() error {
 	if _, err := j.kubeCli.BatchV1().Jobs(j.Job.Namespace).Get(j.Job.Spec.Trainer.ReplicaSpec.Name, v1.GetOptions{}); err != nil {
 		if apierrors.IsNotFound(err) {
 			if _, err = j.kubeCli.BatchV1().Jobs(j.Job.Namespace).Create(j.Job.Spec.Trainer.ReplicaSpec); err != nil {
-				log.Error("error creating trainer", "name", j.trainerName(), "err", err.Error())
+				log.Error("Error creating trainer", "name", j.trainerName(), "err", err.Error())
 				return err
 			}
-			log.Debug("finishing creating trainer", "name", j.trainerName())
+			log.Debug("Finishing creating trainer", "name", j.trainerName())
 			return nil
 		}
-		log.Error("error getting trainer", "name", j.trainerName(), "err", err.Error())
+		log.Error("Error getting trainer", "name", j.trainerName(), "err", err.Error())
 		return err
 	}
 
-	log.Debug("trainer already existing skipping", "name", j.trainerName())
+	log.Debug("Trainer already existing skipping", "name", j.trainerName())
 	return nil
 }
 
 func (j *JobUpdater) deleteTrainingJob() error {
+
+	var frameWork *paddlev1.Framework = nil
+
+	if j.Job.Spec.FrameWork != nil {
+		frameWork = j.Job.Spec.FrameWork
+	}
+
 	if j.Job.Spec.FaultTolerant {
 		log.Debug("deleting master", "name", j.masterName())
 		if err := j.deleteResource(paddlev1.MASTER); err != nil {
@@ -389,16 +500,18 @@ func (j *JobUpdater) deleteTrainingJob() error {
 			return err
 		}
 	}
-
-	log.Debug("deleting pserver", "name", j.pserverName())
-	if err := j.deleteResource(paddlev1.PSERVER); err != nil {
-		log.Error("error deleting: %s, err: %s", j.pserverName(), err.Error())
-		return err
+	if frameWork == nil && !j.Job.Spec.LocalJob && !j.Job.Spec.IsNccl ||
+		frameWork != nil && frameWork.Type == paddlev1.Multi {
+		log.Debug("Deleting pserver", "name", j.pserverName())
+		if err := j.deleteResource(paddlev1.PSERVER); err != nil {
+			log.Error("Deleting pserver error", "name", j.pserverName(), "reason", err.Error())
+			return err
+		}
 	}
 
 	log.Debug("deleting trainer", "name", j.trainerName())
 	if err := j.deleteTrainer(); err != nil {
-		log.Error("error deleting trainer", "name", j.trainerName(), "err", err.Error())
+		log.Error("Deleting trainer error", "name", j.trainerName(), "reason", err.Error())
 		return err
 	}
 
@@ -410,15 +523,25 @@ func (j *JobUpdater) deleteResource(rt paddlev1.TrainingResourceType) error {
 		return err
 	}
 
+	var gracePeriodSeconds *int64 = nil
+	switch rt {
+	case paddlev1.MASTER:
+		gracePeriodSeconds = j.Job.Spec.Master.GracePeriodSeconds
+	case paddlev1.PSERVER:
+		gracePeriodSeconds = j.Job.Spec.Pserver.GracePeriodSeconds
+	default:
+		return ErrorUnkownResourceType
+	}
+
 	resourceName := j.Job.Name + "-" + string(rt)
-	if err := j.kubeCli.ExtensionsV1beta1().ReplicaSets(j.Job.Namespace).Delete(resourceName, &v1.DeleteOptions{}); err != nil {
+	if err := j.kubeCli.ExtensionsV1beta1().ReplicaSets(j.Job.Namespace).Delete(resourceName, &v1.DeleteOptions{GracePeriodSeconds: gracePeriodSeconds}); err != nil {
 		if apierrors.IsNotFound(err) {
-			log.Debug("resource not found, skipped", "namespace", j.Job.Namespace, "name", resourceName)
+			log.Debug("Resource not found, skipped", "namespace", j.Job.Namespace, "name", resourceName)
 			return nil
 		}
 		return err
 	}
-	log.Debug("finishing releasing", "namespace", j.Job.Namespace, "name", resourceName)
+	log.Debug("Finishing releasing", "namespace", j.Job.Namespace, "name", resourceName)
 	return nil
 }
 
@@ -434,23 +557,33 @@ func (j *JobUpdater) deleteTrainer() error {
 		}
 		return err
 	}
-	log.Debug("finishing deleting trainer", "name", j.trainerName())
+	log.Debug("Finishing deleting trainer", "name", j.trainerName())
 	return nil
 }
 
 func (j *JobUpdater) releaseMasterRoles() error {
+
+	var frameWork *paddlev1.Framework = nil
+
+	if j.Job.Spec.FrameWork != nil {
+		frameWork = j.Job.Spec.FrameWork
+	}
+
 	if j.Job.Spec.FaultTolerant {
 		if err := j.releaseResource(paddlev1.MASTER); err != nil {
-			log.Error("error releasing master", "name", j.masterName(), "err", err)
+			log.Error("Error releasing master", "name", j.masterName(), "err", err)
 			return err
 		}
 	}
 
-	if err := j.releaseResource(paddlev1.PSERVER); err != nil {
-		log.Error("error releasing pserver", "name", j.pserverName(), "err", err)
-		return err
-	}
+	if frameWork == nil && !j.Job.Spec.LocalJob && !j.Job.Spec.IsNccl ||
+		frameWork != nil && frameWork.Type == paddlev1.Multi {
+		if err := j.releaseResource(paddlev1.PSERVER); err != nil {
+			log.Error("Error releasing pserver", "name", j.pserverName(), "err", err)
+			return err
+		}
 
+	}
 	return nil
 }
 
@@ -468,10 +601,10 @@ func (j *JobUpdater) releaseResource(rt paddlev1.TrainingResourceType) error {
 	resource, getErr := j.kubeCli.ExtensionsV1beta1().ReplicaSets(j.Job.Namespace).Get(resourceName, v1.GetOptions{})
 	if getErr != nil {
 		if apierrors.IsNotFound(getErr) {
-			log.Debug("resouce instance not exist, skipped", "namespace", j.Job.Namespace, "name", resourceName)
+			log.Debug("Resouce instance not exist, skipped", "namespace", j.Job.Namespace, "name", resourceName)
 			return nil
 		}
-		log.Error("error getting instance", "namespace", j.Job.Namespace, "name", resourceName, "err", getErr)
+		log.Error("Error getting instance", "namespace", j.Job.Namespace, "name", resourceName, "err", getErr)
 		return getErr
 	}
 
@@ -514,17 +647,17 @@ func (j *JobUpdater) releaseTrainer() error {
 		if apierrors.IsNotFound(getErr) {
 			return nil
 		}
-		log.Error("error getting job spec for TrainingJob trainer", "name", j.trainerName())
+		log.Error("Error getting job spec for TrainingJob trainer", "name", j.trainerName())
 		return getErr
 	}
 
 	if *jobSpec.Spec.Parallelism != 0 {
-		log.Debug("reset parallelism to zero for TrainingJob trainer", "name", j.trainerName())
+		log.Debug("Reset parallelism to zero for TrainingJob trainer", "name", j.trainerName())
 		var parallism int32
 		parallism = 0
 		jobSpec.Spec.Parallelism = &parallism
 		if _, err := j.kubeCli.BatchV1().Jobs(jobNs).Update(jobSpec); err != nil {
-			log.Error("error resetting parallelism for TrainingJob trainer", "name", j.trainerName())
+			log.Error("Error resetting parallelism for TrainingJob trainer", "name", j.trainerName())
 			return err
 		}
 	}
@@ -538,7 +671,7 @@ func (j *JobUpdater) releaseTrainer() error {
 	}
 
 	if err := j.kubeCli.CoreV1().Pods(jobNs).DeleteCollection(&v1.DeleteOptions{}, options); err != nil {
-		log.Error("error deleting pods of TrainingJob trainer", "name", j.trainerName())
+		log.Error("Error deleting pods of TrainingJob trainer", "name", j.trainerName())
 		return err
 	}
 
@@ -546,6 +679,12 @@ func (j *JobUpdater) releaseTrainer() error {
 }
 
 func (j *JobUpdater) jobTotalRunning() (bool, error) {
+	var frameWork *paddlev1.Framework = nil
+
+	if j.Job.Spec.FrameWork != nil {
+		frameWork = j.Job.Spec.FrameWork
+	}
+
 	if j.Job.Spec.FaultTolerant {
 		masterRunning, err := j.masterRoleTotalRunning(paddlev1.MASTER)
 		if err != nil {
@@ -556,12 +695,15 @@ func (j *JobUpdater) jobTotalRunning() (bool, error) {
 		}
 	}
 
-	pserverRunning, err := j.masterRoleTotalRunning(paddlev1.PSERVER)
-	if err != nil {
-		return false, err
-	}
-	if !pserverRunning {
-		return false, nil
+	if frameWork == nil && !j.Job.Spec.LocalJob && !j.Job.Spec.IsNccl ||
+		frameWork != nil && frameWork.Type == paddlev1.Multi {
+		pserverRunning, err := j.masterRoleTotalRunning(paddlev1.PSERVER)
+		if err != nil {
+			return false, err
+		}
+		if !pserverRunning {
+			return false, nil
+		}
 	}
 
 	return j.trainerTotalRunning()
@@ -582,7 +724,7 @@ func (j *JobUpdater) masterRoleTotalRunning(rt paddlev1.TrainingResourceType) (b
 		return false, err
 	}
 
-	log.Debug("resource status", "namespace", j.Job.Namespace, "name", resourceName, "status", resource.Status)
+	log.Debug("Resource status", "namespace", j.Job.Namespace, "name", resourceName, "status", resource.Status)
 	if resource.Status.ReadyReplicas >= *resource.Spec.Replicas {
 		return true, nil
 	}
@@ -596,7 +738,7 @@ func (j *JobUpdater) trainerTotalRunning() (bool, error) {
 		return false, err
 	}
 
-	log.Debug("trainer status", "namespace", j.Job.Namespace, "name", trainerName, "status", trainers.Status)
+	log.Debug("Trainer status", "namespace", j.Job.Namespace, "name", trainerName, "status", trainers.Status)
 	podsList, err := j.kubeCli.CoreV1().Pods(j.Job.Namespace).List(v1.ListOptions{LabelSelector: "paddle-job=" + j.Job.Name})
 	var runningPodCount int32
 	for _, pod := range podsList.Items {
@@ -605,7 +747,7 @@ func (j *JobUpdater) trainerTotalRunning() (bool, error) {
 		}
 	}
 
-	if runningPodCount == *trainers.Spec.Parallelism {
+	if runningPodCount >= *trainers.Spec.Parallelism {
 		return true, nil
 	}
 	return false, nil
@@ -643,11 +785,107 @@ func (j *JobUpdater) scale() (err error) {
 	jobSpec.Spec.Parallelism = &newParallelism
 	jobSpec.Spec.BackoffLimit = &newBackoffLimit
 	j.Job.Spec.Trainer.ReplicaSpec.Spec.Parallelism = &newParallelism
-	log.Debug("scaling job", "namespace", jobNs, "name", jobName, "new instance num", newParallelism)
+	log.Debug("Scaling job", "namespace", jobNs, "name", jobName, "new instance num", newParallelism)
 	if _, err := j.kubeCli.BatchV1().Jobs(jobNs).Update(jobSpec); err != nil {
-		log.Debug("failed to scale job", "namespace", jobNs, "name", jobName, "error", err.Error())
+		log.Debug("Failed to scale job", "namespace", jobNs, "name", jobName, "error", err.Error())
 		return err
 	}
+
+	return nil
+}
+
+func (j *JobUpdater) addLabelToPods() (bool, error) {
+
+	podsList, err := j.kubeCli.CoreV1().Pods(j.Job.Namespace).List(v1.ListOptions{LabelSelector: "paddle-job=" + j.
+		Job.Name})
+	if err != nil {
+		return false, err
+	}
+
+	for idx, pod := range podsList.Items {
+		oldPod := pod
+		if oldPod.Status.Phase != corev1.PodRunning || oldPod.DeletionTimestamp != nil {
+			continue
+		}
+
+		labels := oldPod.GetLabels()
+		labels[j.trainerName()+"-idx"] = strconv.Itoa(idx)
+		oldPod.SetLabels(labels)
+
+		if _, err := j.kubeCli.CoreV1().Pods(j.Job.Namespace).Update(&oldPod); err != nil {
+			log.Error(fmt.Sprintf("Resource status updated failed", "namespace", j.Job.Namespace, "name", oldPod.Name))
+			return false, err
+		}
+
+		if int32(idx) > *j.Job.Spec.Trainer.ReplicaSpec.Spec.Parallelism-1 {
+			log.Warn("Index exceeded parallelism", "index", idx)
+			break
+		}
+	}
+
+	return true, nil
+}
+
+func (j *JobUpdater) traceAddLabelToPods() error {
+	var indexMap = make(map[int]string)
+	unIndexedPod := make([]*corev1.Pod, 0)
+	podsList, err := j.kubeCli.CoreV1().Pods(j.Job.Namespace).List(v1.ListOptions{LabelSelector: "paddle-job=" + j.
+		Job.Name})
+	if err != nil {
+		return err
+	}
+
+	for _, pod := range podsList.Items {
+		oldPod := pod
+		if oldPod.Status.Phase != corev1.PodRunning && oldPod.Status.Phase != corev1.PodSucceeded {
+			continue
+		}
+
+		if oldPod.DeletionTimestamp != nil {
+			continue
+		}
+		labels := oldPod.GetLabels()
+
+		v, exist := labels[j.trainerName()+"-idx"]
+		if exist {
+			if id, err := strconv.Atoi(v); err == nil {
+				indexMap[id] = oldPod.Name
+			}
+			continue
+		} else {
+			unIndexedPod = append(unIndexedPod, &oldPod)
+		}
+
+	}
+
+	log.Info("UnIndexed pod info", "pods", unIndexedPod)
+
+	for id := 0; id < int(*j.Job.Spec.Trainer.ReplicaSpec.Spec.Parallelism); id++ {
+		podLen := len(unIndexedPod)
+		if _, exist := indexMap[id]; !exist && podLen > 0 {
+
+			oldPod := *unIndexedPod[0]
+			indexMap[id] = oldPod.Name
+			labels := oldPod.GetLabels()
+			labels[j.trainerName()+"-idx"] = strconv.Itoa(id)
+			oldPod.SetLabels(labels)
+
+			if _, err := j.kubeCli.CoreV1().Pods(j.Job.Namespace).Update(&oldPod); err != nil {
+				log.Error("Resource status updated failed", "namespace", j.Job.Namespace, "name", oldPod.Name)
+				return err
+			}
+
+			if podLen > 1 {
+				unIndexedPod = unIndexedPod[1 : len(indexMap)-1]
+			} else {
+				log.Info("Finished trace label of job:")
+				break
+			}
+
+		}
+	}
+
+	log.Info(fmt.Sprintf("Traced indexMap info: %+v", indexMap))
 
 	return nil
 }

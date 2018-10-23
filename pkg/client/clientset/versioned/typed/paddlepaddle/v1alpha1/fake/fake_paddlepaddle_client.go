@@ -15,22 +15,22 @@ limitations under the License.
 */package fake
 
 import (
-	v1 "github.com/baidu/paddle-on-k8s-operator/pkg/client/clientset/versioned/typed/paddlepaddle/v1"
+	v1alpha1 "github.com/baidu/paddle-on-k8s-operator/pkg/client/clientset/versioned/typed/paddlepaddle/v1alpha1"
 	rest "k8s.io/client-go/rest"
 	testing "k8s.io/client-go/testing"
 )
 
-type FakePaddlepaddleV1 struct {
+type FakePaddlepaddleV1alpha1 struct {
 	*testing.Fake
 }
 
-func (c *FakePaddlepaddleV1) TrainingJobs(namespace string) v1.TrainingJobInterface {
+func (c *FakePaddlepaddleV1alpha1) TrainingJobs(namespace string) v1alpha1.TrainingJobInterface {
 	return &FakeTrainingJobs{c, namespace}
 }
 
 // RESTClient returns a RESTClient that is used to communicate
 // with API server by this client implementation.
-func (c *FakePaddlepaddleV1) RESTClient() rest.Interface {
+func (c *FakePaddlepaddleV1alpha1) RESTClient() rest.Interface {
 	var ret *rest.RESTClient
 	return ret
 }

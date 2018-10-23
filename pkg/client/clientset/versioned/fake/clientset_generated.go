@@ -16,8 +16,8 @@ limitations under the License.
 
 import (
 	clientset "github.com/baidu/paddle-on-k8s-operator/pkg/client/clientset/versioned"
-	paddlepaddlev1 "github.com/baidu/paddle-on-k8s-operator/pkg/client/clientset/versioned/typed/paddlepaddle/v1"
-	fakepaddlepaddlev1 "github.com/baidu/paddle-on-k8s-operator/pkg/client/clientset/versioned/typed/paddlepaddle/v1/fake"
+	paddlepaddlev1alpha1 "github.com/baidu/paddle-on-k8s-operator/pkg/client/clientset/versioned/typed/paddlepaddle/v1alpha1"
+	fakepaddlepaddlev1alpha1 "github.com/baidu/paddle-on-k8s-operator/pkg/client/clientset/versioned/typed/paddlepaddle/v1alpha1/fake"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/discovery"
@@ -58,12 +58,12 @@ func (c *Clientset) Discovery() discovery.DiscoveryInterface {
 
 var _ clientset.Interface = &Clientset{}
 
-// PaddlepaddleV1 retrieves the PaddlepaddleV1Client
-func (c *Clientset) PaddlepaddleV1() paddlepaddlev1.PaddlepaddleV1Interface {
-	return &fakepaddlepaddlev1.FakePaddlepaddleV1{Fake: &c.Fake}
+// PaddlepaddleV1alpha1 retrieves the PaddlepaddleV1alpha1Client
+func (c *Clientset) PaddlepaddleV1alpha1() paddlepaddlev1alpha1.PaddlepaddleV1alpha1Interface {
+	return &fakepaddlepaddlev1alpha1.FakePaddlepaddleV1alpha1{Fake: &c.Fake}
 }
 
-// Paddlepaddle retrieves the PaddlepaddleV1Client
-func (c *Clientset) Paddlepaddle() paddlepaddlev1.PaddlepaddleV1Interface {
-	return &fakepaddlepaddlev1.FakePaddlepaddleV1{Fake: &c.Fake}
+// Paddlepaddle retrieves the PaddlepaddleV1alpha1Client
+func (c *Clientset) Paddlepaddle() paddlepaddlev1alpha1.PaddlepaddleV1alpha1Interface {
+	return &fakepaddlepaddlev1alpha1.FakePaddlepaddleV1alpha1{Fake: &c.Fake}
 }

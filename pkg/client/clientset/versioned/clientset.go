@@ -15,7 +15,7 @@ limitations under the License.
 */package versioned
 
 import (
-	paddlepaddlev1 "github.com/baidu/paddle-on-k8s-operator/pkg/client/clientset/versioned/typed/paddlepaddle/v1"
+	paddlepaddlev1alpha1 "github.com/baidu/paddle-on-k8s-operator/pkg/client/clientset/versioned/typed/paddlepaddle/v1alpha1"
 	glog "github.com/golang/glog"
 	discovery "k8s.io/client-go/discovery"
 	rest "k8s.io/client-go/rest"
@@ -24,27 +24,27 @@ import (
 
 type Interface interface {
 	Discovery() discovery.DiscoveryInterface
-	PaddlepaddleV1() paddlepaddlev1.PaddlepaddleV1Interface
+	PaddlepaddleV1alpha1() paddlepaddlev1alpha1.PaddlepaddleV1alpha1Interface
 	// Deprecated: please explicitly pick a version if possible.
-	Paddlepaddle() paddlepaddlev1.PaddlepaddleV1Interface
+	Paddlepaddle() paddlepaddlev1alpha1.PaddlepaddleV1alpha1Interface
 }
 
 // Clientset contains the clients for groups. Each group has exactly one
 // version included in a Clientset.
 type Clientset struct {
 	*discovery.DiscoveryClient
-	paddlepaddleV1 *paddlepaddlev1.PaddlepaddleV1Client
+	paddlepaddleV1alpha1 *paddlepaddlev1alpha1.PaddlepaddleV1alpha1Client
 }
 
-// PaddlepaddleV1 retrieves the PaddlepaddleV1Client
-func (c *Clientset) PaddlepaddleV1() paddlepaddlev1.PaddlepaddleV1Interface {
-	return c.paddlepaddleV1
+// PaddlepaddleV1alpha1 retrieves the PaddlepaddleV1alpha1Client
+func (c *Clientset) PaddlepaddleV1alpha1() paddlepaddlev1alpha1.PaddlepaddleV1alpha1Interface {
+	return c.paddlepaddleV1alpha1
 }
 
 // Deprecated: Paddlepaddle retrieves the default version of PaddlepaddleClient.
 // Please explicitly pick a version.
-func (c *Clientset) Paddlepaddle() paddlepaddlev1.PaddlepaddleV1Interface {
-	return c.paddlepaddleV1
+func (c *Clientset) Paddlepaddle() paddlepaddlev1alpha1.PaddlepaddleV1alpha1Interface {
+	return c.paddlepaddleV1alpha1
 }
 
 // Discovery retrieves the DiscoveryClient
@@ -63,7 +63,7 @@ func NewForConfig(c *rest.Config) (*Clientset, error) {
 	}
 	var cs Clientset
 	var err error
-	cs.paddlepaddleV1, err = paddlepaddlev1.NewForConfig(&configShallowCopy)
+	cs.paddlepaddleV1alpha1, err = paddlepaddlev1alpha1.NewForConfig(&configShallowCopy)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +80,7 @@ func NewForConfig(c *rest.Config) (*Clientset, error) {
 // panics if there is an error in the config.
 func NewForConfigOrDie(c *rest.Config) *Clientset {
 	var cs Clientset
-	cs.paddlepaddleV1 = paddlepaddlev1.NewForConfigOrDie(c)
+	cs.paddlepaddleV1alpha1 = paddlepaddlev1alpha1.NewForConfigOrDie(c)
 
 	cs.DiscoveryClient = discovery.NewDiscoveryClientForConfigOrDie(c)
 	return &cs
@@ -89,7 +89,7 @@ func NewForConfigOrDie(c *rest.Config) *Clientset {
 // New creates a new Clientset for the given RESTClient.
 func New(c rest.Interface) *Clientset {
 	var cs Clientset
-	cs.paddlepaddleV1 = paddlepaddlev1.New(c)
+	cs.paddlepaddleV1alpha1 = paddlepaddlev1alpha1.New(c)
 
 	cs.DiscoveryClient = discovery.NewDiscoveryClient(c)
 	return &cs

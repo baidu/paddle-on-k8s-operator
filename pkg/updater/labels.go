@@ -16,3 +16,13 @@ func (l Labels) LabelsParser() (string, error) {
 	}
 	return strings.Join(pieces, ","), nil
 }
+
+// HasLabel check if has the label
+func (l Labels) HasLabel(labname string) (bool, string) {
+	for k, v := range l {
+		if k == labname {
+			return true, v
+		}
+	}
+	return false, ""
+}
