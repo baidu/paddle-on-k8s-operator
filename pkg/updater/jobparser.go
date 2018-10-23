@@ -18,14 +18,24 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	v1beta1 "k8s.io/api/extensions/v1beta1"
+	"k8s.io/api/extensions/v1beta1"
 	apiresource "k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 
-	paddlev1 "github.com/baidu/paddle-on-k8s-operator/pkg/apis/paddlepaddle/v1"
+	paddlev1 "github.com/baidu/paddle-on-k8s-operator/pkg/apis/paddlepaddle/v1alpha1"
+)
+
+type PodType string
+
+const (
+	PSERVER PodType = "pserver"
+	TRAINER PodType = "trainer"
+	MASTER  PodType = "master"
 )
 
 const (
@@ -76,8 +86,8 @@ func (p *DefaultJobParser) NewTrainingJob(job *paddlev1.TrainingJob) (*paddlev1.
 			job.Spec.Master.ReplicaSpec.Spec.Template.Spec.HostNetwork = true
 		}
 	}
-	job.Spec.Pserver.ReplicaSpec = parseToPserver(job)
-	job.Spec.Trainer.ReplicaSpec = parseToTrainer(job)
+	job.Spec.Pserver.ReplicaSpec = parseToPserver(job, nil, true)
+	job.Spec.Trainer.ReplicaSpec = parseToTrainer(job, nil, true)
 	if useHostNetwork {
 		job.Spec.Pserver.ReplicaSpec.Spec.Template.Spec.HostNetwork = true
 		job.Spec.Trainer.ReplicaSpec.Spec.Template.Spec.HostNetwork = true
@@ -86,8 +96,10 @@ func (p *DefaultJobParser) NewTrainingJob(job *paddlev1.TrainingJob) (*paddlev1.
 }
 
 // parseToPserver generate a pserver replicaset resource according to "TrainingJob" resource specs.
-func parseToPserver(job *paddlev1.TrainingJob) *v1beta1.ReplicaSet {
+func parseToPserver(job *paddlev1.TrainingJob, extraEnv []corev1.EnvVar, outter bool) *v1beta1.ReplicaSet {
 	replicas := int32(job.Spec.Pserver.MinInstance)
+	envs := podEnv(job, job.Spec.Pserver.Envs)
+	envs = append(envs, extraEnv...)
 	spec := &v1beta1.ReplicaSet{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "extensions/v1beta1",
@@ -101,7 +113,7 @@ func parseToPserver(job *paddlev1.TrainingJob) *v1beta1.ReplicaSet {
 			Replicas: &replicas,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels:      map[string]string{"paddle-job-pserver": job.ObjectMeta.Name},
+					Labels:      map[string]string{"paddle-job-pserver": job.ObjectMeta.Name, "priority": job.Spec.Annotations.Priority},
 					Annotations: map[string]string{"scheduling.k8s.io/group-name": job.Spec.PodGroupName},
 				},
 				Spec: corev1.PodSpec{
@@ -109,19 +121,26 @@ func parseToPserver(job *paddlev1.TrainingJob) *v1beta1.ReplicaSet {
 					Volumes:       job.Spec.Volumes,
 					Containers: []corev1.Container{
 						corev1.Container{
-							Name:      "pserver",
-							Image:     job.Spec.Image,
-							Ports:     podPorts(job),
-							Env:       podEnv(job),
-							Resources: job.Spec.Pserver.Resources,
+							Name:  "pserver",
+							Image: job.Spec.Image,
+							Ports: podPorts(job, PSERVER),
+							Env:   envs,
+							//Command:   command,
+							Resources:      job.Spec.Pserver.Resources,
+							Lifecycle:      parseLifeCycle(job, PSERVER),
+							ReadinessProbe: job.Spec.Pserver.ReadinessProbe,
+							LivenessProbe:  job.Spec.Pserver.LivenessProbe,
 						},
 					},
+					Tolerations:                   parseTolerations(job, PSERVER),
+					TerminationGracePeriodSeconds: job.Spec.Pserver.GracePeriodSeconds,
+					NodeSelector:                  job.Spec.Pserver.NodeSelector,
 				},
 			},
 		},
 	}
 
-	if !job.Spec.Matrix {
+	if outter {
 		var command []string
 		entryPoint := job.Spec.Pserver.Entrypoint
 		if len(entryPoint) == 0 {
@@ -133,17 +152,29 @@ func parseToPserver(job *paddlev1.TrainingJob) *v1beta1.ReplicaSet {
 			}
 		} else {
 			// user-defined start command
-			command = []string{entryPoint}
+			command = strings.Split(entryPoint, " ")
 		}
 		spec.Spec.Template.Spec.Containers[0].Command = command
+	}
+
+	if job.Spec.Annotations.Scheduler != "" {
+		spec.Spec.Template.Spec.SchedulerName = job.Spec.Annotations.Scheduler
+	}
+
+	if len(job.Spec.Trainer.ImagePullSecrets) != 0 {
+		spec.Spec.Template.Spec.ImagePullSecrets = job.Spec.Trainer.ImagePullSecrets
 	}
 
 	return spec
 }
 
 // parseToTrainer parse TrainingJob to a kubernetes job resource.
-func parseToTrainer(job *paddlev1.TrainingJob) *batchv1.Job {
+func parseToTrainer(job *paddlev1.TrainingJob, extraEnv []corev1.EnvVar, outter bool) *batchv1.Job {
 	replicas := int32(job.Spec.Trainer.MinInstance)
+	backoffLimit := int32(0)
+
+	envs := podEnv(job, job.Spec.Trainer.Envs)
+	envs = append(envs, extraEnv...)
 	spec := &batchv1.Job{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "Job",
@@ -154,11 +185,13 @@ func parseToTrainer(job *paddlev1.TrainingJob) *batchv1.Job {
 			Namespace: job.ObjectMeta.Namespace,
 		},
 		Spec: batchv1.JobSpec{
-			Parallelism: &replicas,
+			BackoffLimit: &backoffLimit,
+			Parallelism:  &replicas,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels:      map[string]string{"paddle-job": job.ObjectMeta.Name},
-					Annotations: map[string]string{"scheduling.k8s.io/group-name": job.Spec.PodGroupName},
+					Labels: map[string]string{"paddle-job": job.ObjectMeta.Name,
+						"priority": job.Spec.Annotations.Priority},
+					Annotations: map[string]string{"scheduling.k8s.io/group-name": job.Spec.PodGroupName, "priority": job.Spec.Annotations.Priority},
 				},
 				Spec: corev1.PodSpec{
 					SchedulerName: job.Spec.SchedulerName,
@@ -169,18 +202,24 @@ func parseToTrainer(job *paddlev1.TrainingJob) *batchv1.Job {
 							Image:           job.Spec.Image,
 							ImagePullPolicy: imagePullPolicy,
 							VolumeMounts:    job.Spec.VolumeMounts,
-							Ports:           podPorts(job),
-							Env:             podEnv(job),
+							Env:             envs,
 							Resources:       job.Spec.Trainer.Resources,
+							Ports:           podPorts(job, TRAINER),
+							Lifecycle:       parseLifeCycle(job, TRAINER),
+							ReadinessProbe:  job.Spec.Trainer.ReadinessProbe,
+							LivenessProbe:   job.Spec.Trainer.LivenessProbe,
 						},
 					},
-					RestartPolicy: "Never",
+					Tolerations:                   parseTolerations(job, TRAINER),
+					TerminationGracePeriodSeconds: job.Spec.Trainer.GracePeriodSeconds,
+					NodeSelector:                  job.Spec.Trainer.NodeSelector,
+					RestartPolicy:                 "Never",
 				},
 			},
 		},
 	}
 
-	if !job.Spec.Matrix {
+	if outter {
 		var command []string
 		entryPoint := job.Spec.Trainer.Entrypoint
 		if len(entryPoint) == 0 {
@@ -192,9 +231,18 @@ func parseToTrainer(job *paddlev1.TrainingJob) *batchv1.Job {
 			}
 		} else {
 			// user-defined start command
-			command = []string{entryPoint}
+			command = strings.Split(entryPoint, " ")
+
 		}
 		spec.Spec.Template.Spec.Containers[0].Command = command
+	}
+
+	if job.Spec.Annotations.Scheduler != "" {
+		spec.Spec.Template.Spec.SchedulerName = job.Spec.Annotations.Scheduler
+	}
+
+	if len(job.Spec.Trainer.ImagePullSecrets) != 0 {
+		spec.Spec.Template.Spec.ImagePullSecrets = job.Spec.Trainer.ImagePullSecrets
 	}
 
 	return spec
@@ -226,7 +274,7 @@ func getEtcdPodSpec(job *paddlev1.TrainingJob) *corev1.Container {
 		Name:            "etcd",
 		Image:           "m3ngyang/etcd:v3.2.1",
 		ImagePullPolicy: imagePullPolicy,
-		Env:             podEnv(job),
+		Env:             podEnv(job, nil),
 		Command:         command,
 	}
 }
@@ -234,7 +282,8 @@ func getEtcdPodSpec(job *paddlev1.TrainingJob) *corev1.Container {
 // parseToMaster parse TrainingJob to a kubernetes replicaset resource.
 func parseToMaster(job *paddlev1.TrainingJob) *v1beta1.ReplicaSet {
 	replicas := int32(1)
-	command := []string{"paddle_k8s", "start_master"}
+	//command := []string{"paddle_k8s", "start_master"}
+	command := []string{"sleep", "100000"}
 
 	return &v1beta1.ReplicaSet{
 		TypeMeta: metav1.TypeMeta{
@@ -249,7 +298,7 @@ func parseToMaster(job *paddlev1.TrainingJob) *v1beta1.ReplicaSet {
 			Replicas: &replicas,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels:      map[string]string{"paddle-job-master": job.ObjectMeta.Name},
+					Labels:      map[string]string{"paddle-job-master": job.ObjectMeta.Name, "priority": job.Spec.Annotations.Priority},
 					Annotations: map[string]string{"scheduling.k8s.io/group-name": job.Spec.PodGroupName},
 				},
 				Spec: corev1.PodSpec{
@@ -264,9 +313,15 @@ func parseToMaster(job *paddlev1.TrainingJob) *v1beta1.ReplicaSet {
 							Command:         command,
 							VolumeMounts:    job.Spec.VolumeMounts,
 							Resources:       *masterResource(job),
+							Lifecycle:       parseLifeCycle(job, MASTER),
+							ReadinessProbe:  job.Spec.Master.ReadinessProbe,
+							LivenessProbe:   job.Spec.Master.LivenessProbe,
 						},
 						*getEtcdPodSpec(job),
 					},
+					Tolerations:                   parseTolerations(job, MASTER),
+					TerminationGracePeriodSeconds: job.Spec.Master.GracePeriodSeconds,
+					NodeSelector:                  job.Spec.Master.NodeSelector,
 				},
 			},
 		},
@@ -274,18 +329,85 @@ func parseToMaster(job *paddlev1.TrainingJob) *v1beta1.ReplicaSet {
 }
 
 // general functions that pserver, trainer use the same
-func podPorts(job *paddlev1.TrainingJob) []corev1.ContainerPort {
-	portsTotal := job.Spec.PortsNum + job.Spec.PortsNumForSparse
+func podPorts(job *paddlev1.TrainingJob, podType PodType) []corev1.ContainerPort {
+
+	var portsTotal = 0
+	var basePort int32 = 0
 	ports := make([]corev1.ContainerPort, 0)
-	basePort := int32(job.Spec.Port)
-	for i := 0; i < portsTotal; i++ {
-		ports = append(ports, corev1.ContainerPort{
-			Name:          fmt.Sprintf("jobport-%d", basePort),
-			ContainerPort: basePort,
-		})
-		basePort++
+
+	if job.Spec.FrameWork == nil {
+
+		if job.Spec.IsNccl && TRAINER == podType ||
+			!job.Spec.IsNccl && PSERVER == podType {
+
+			basePort = int32(job.Spec.Port)
+			portsTotal = job.Spec.PortsNum + job.Spec.PortsNumForSparse
+
+			for i := 0; i < portsTotal; i++ {
+				ports = append(ports, corev1.ContainerPort{
+					Name:          fmt.Sprintf("jobport-%d", basePort),
+					ContainerPort: basePort,
+				})
+				basePort++
+			}
+
+			return ports
+		}
+		return nil
 	}
-	return ports
+
+	framework := *job.Spec.FrameWork
+
+	if framework.Type == paddlev1.Multi {
+
+		if PSERVER == podType {
+
+			portsTotal = job.Spec.PortsNum + job.Spec.PortsNumForSparse
+			basePort = int32(job.Spec.Port)
+
+		} else if TRAINER == podType {
+
+			if paddlev1.TensorFlow != framework.Name {
+				return nil
+			}
+
+			portsTotal = job.Spec.TrainerPortsNum
+			basePort = int32(job.Spec.TrainerPort)
+
+		}
+
+		for i := 0; i < portsTotal; i++ {
+			ports = append(ports, corev1.ContainerPort{
+				Name:          fmt.Sprintf("jobport-%d", basePort),
+				ContainerPort: basePort,
+			})
+			basePort++
+		}
+		return ports
+	}
+
+	if framework.Type == paddlev1.Nccl2 {
+
+		if TRAINER != podType {
+			return nil
+		}
+
+		basePort = int32(job.Spec.TrainerPort)
+		portsTotal = job.Spec.TrainerPortsNum
+
+		for i := 0; i < portsTotal; i++ {
+			ports = append(ports, corev1.ContainerPort{
+				Name:          fmt.Sprintf("jobport-%d", basePort),
+				ContainerPort: basePort,
+			})
+			basePort++
+		}
+
+		return ports
+
+	}
+
+	return nil
 }
 
 func masterPorts(job *paddlev1.TrainingJob) []corev1.ContainerPort {
@@ -302,7 +424,7 @@ func masterPorts(job *paddlev1.TrainingJob) []corev1.ContainerPort {
 	return ports
 }
 
-func podEnv(job *paddlev1.TrainingJob) []corev1.EnvVar {
+func podEnv(job *paddlev1.TrainingJob, envs map[string]string) []corev1.EnvVar {
 	needGPU := "0"
 	if job.NeedGPU() {
 		needGPU = "1"
@@ -317,7 +439,7 @@ func podEnv(job *paddlev1.TrainingJob) []corev1.EnvVar {
 		trainerCount = int(q.Value())
 	}
 
-	return []corev1.EnvVar{
+	podEnv := []corev1.EnvVar{
 		corev1.EnvVar{Name: "PADDLE_JOB_NAME", Value: job.ObjectMeta.Name},
 		// NOTICE: TRAINERS, PSERVERS, PADDLE_INIT_NUM_GRADIENT_SERVERS
 		//         these env are used for non-faulttolerant training,
@@ -349,7 +471,192 @@ func podEnv(job *paddlev1.TrainingJob) []corev1.EnvVar {
 				FieldPath: "status.podIP",
 			},
 		}},
+		corev1.EnvVar{Name: "POD_NAME", ValueFrom: &corev1.EnvVarSource{
+			FieldRef: &corev1.ObjectFieldSelector{
+				FieldPath: "metadata.name",
+			},
+		}},
 	}
+
+	for k, v := range envs {
+		item := corev1.EnvVar{
+			Name:  k,
+			Value: v,
+		}
+		podEnv = append(podEnv, item)
+	}
+	return podEnv
+}
+
+// Validate updates default values for the added job and validates the fields.
+func (p *DefaultJobParser) Validate(job *paddlev1.TrainingJob) error {
+
+	var frameWork *paddlev1.Framework = nil
+
+	if job.Spec.FrameWork != nil {
+		frameWork = job.Spec.FrameWork
+	}
+	// Fill in default values
+	// FIXME: Need to test. What is the value if specified "omitempty"
+	if job.Spec.Port == 0 {
+		job.Spec.Port = 7164
+	}
+	if job.Spec.PortsNum == 0 {
+		job.Spec.PortsNum = 1
+	}
+	if job.Spec.PortsNumForSparse == 0 {
+		job.Spec.PortsNumForSparse = 1
+	}
+	if job.Spec.Image == "" {
+		job.Spec.Image = "paddlepaddle/paddlecloud-job"
+	}
+	if job.Spec.Passes == 0 {
+		job.Spec.Passes = 1
+	}
+	// only one trainer instance for local job
+	if frameWork == nil && job.Spec.LocalJob ||
+		frameWork != nil && frameWork.Type == paddlev1.Local {
+		job.Spec.Trainer.MaxInstance = 1
+		job.Spec.Trainer.MinInstance = 1
+	}
+
+	//if !job.Spec.FaultTolerant && job.Elastic() {
+	//	return errors.New("max-instances should equal to min-instances when fault_tolerant is disabled")
+	//}
+	// TODO: add validations.
+
+	return nil
+}
+
+func (p *DefaultJobParser) GetExtraEnv(job *paddlev1.TrainingJob, kube kubernetes.Interface) ([]corev1.EnvVar, error) {
+	var envs []corev1.EnvVar
+
+	if !job.Spec.Matrix {
+		kubeSvc, err := kube.CoreV1().Services("default").Get("kubernetes", metav1.GetOptions{})
+		if err != nil {
+			return envs, err
+		}
+		item := corev1.EnvVar{
+			Name:  "KUBERNETES_SERVICE_HOST",
+			Value: kubeSvc.Spec.ClusterIP,
+		}
+		envs = append(envs, item)
+	}
+
+	return envs, nil
+}
+
+func parseLifeCycle(job *paddlev1.TrainingJob, podType PodType) *corev1.Lifecycle {
+
+	cmd := []string{}
+	switch podType {
+	case TRAINER:
+		if job.Spec.Trainer.GracePeriodSeconds != nil {
+			cmd = job.Spec.Trainer.PreStopCmd
+		}
+		break
+	case MASTER:
+		if job.Spec.Master.GracePeriodSeconds != nil {
+			cmd = job.Spec.Master.PreStopCmd
+		}
+		break
+	case PSERVER:
+		if job.Spec.Pserver.GracePeriodSeconds != nil {
+			cmd = job.Spec.Pserver.PreStopCmd
+		}
+		break
+	default:
+		return nil
+	}
+	if len(cmd) == 0 {
+		return nil
+	}
+
+	return &corev1.Lifecycle{
+		PreStop: &corev1.Handler{
+			Exec: &corev1.ExecAction{
+				Command: cmd,
+			},
+		},
+	}
+}
+
+func parseTolerations(job *paddlev1.TrainingJob, podType PodType) []corev1.Toleration {
+	switch podType {
+	case TRAINER:
+		if len(job.Spec.Trainer.Tolerations) > 0 {
+			return job.Spec.Trainer.Tolerations
+		}
+		return nil
+	case MASTER:
+		if len(job.Spec.Master.Tolerations) > 0 {
+			return job.Spec.Trainer.Tolerations
+		}
+		return nil
+	case PSERVER:
+		if len(job.Spec.Pserver.Tolerations) > 0 {
+			return job.Spec.Trainer.Tolerations
+		}
+		return nil
+	default:
+		return nil
+	}
+	return nil
+}
+
+func (p *DefaultJobParser) ParseToTrainingJob(job *paddlev1.TrainingJob,
+	extraEnv []corev1.EnvVar) *paddlev1.TrainingJob {
+	var frameWork *paddlev1.Framework = nil
+
+	if job.Spec.FaultTolerant {
+		job.Spec.Master.ReplicaSpec = parseToMaster(job)
+		if job.Spec.HostNetwork {
+			job.Spec.Master.ReplicaSpec.Spec.Template.Spec.HostNetwork = true
+		}
+	} else {
+		job.Spec.Master = paddlev1.MasterSpec{}
+	}
+
+	job.Spec.Trainer.ReplicaSpec = parseToTrainer(job, extraEnv, false)
+
+	if job.Spec.FrameWork != nil {
+		frameWork = job.Spec.FrameWork
+
+		if frameWork.Type == paddlev1.Multi {
+			job.Spec.Pserver.ReplicaSpec = parseToPserver(job, extraEnv, false)
+
+			if job.Spec.HostNetwork {
+				job.Spec.Pserver.ReplicaSpec.Spec.Template.Spec.HostNetwork = true
+
+				if frameWork.Name == paddlev1.TensorFlow {
+					job.Spec.Trainer.ReplicaSpec.Spec.Template.Spec.HostNetwork = true
+				}
+			}
+
+		} else {
+			job.Spec.Pserver = paddlev1.PserverSpec{}
+		}
+
+		if frameWork.Type == paddlev1.Nccl2 && job.Spec.HostNetwork {
+			job.Spec.Trainer.ReplicaSpec.Spec.Template.Spec.HostNetwork = true
+		}
+		return job
+	}
+
+	if !job.Spec.LocalJob && !job.Spec.IsNccl {
+		job.Spec.Pserver.ReplicaSpec = parseToPserver(job, extraEnv, false)
+		if job.Spec.HostNetwork {
+			job.Spec.Pserver.ReplicaSpec.Spec.Template.Spec.HostNetwork = true
+		}
+	} else {
+		job.Spec.Pserver = paddlev1.PserverSpec{}
+	}
+
+	if job.Spec.IsNccl && job.Spec.HostNetwork {
+		job.Spec.Trainer.ReplicaSpec.Spec.Template.Spec.HostNetwork = true
+	}
+
+	return job
 }
 
 // general functions end

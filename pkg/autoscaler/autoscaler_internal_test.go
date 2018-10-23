@@ -18,7 +18,7 @@ import (
 	"sync"
 	"testing"
 
-	padv1 "github.com/baidu/paddle-on-k8s-operator/pkg/apis/paddlepaddle/v1"
+	padv1 "github.com/baidu/paddle-on-k8s-operator/pkg/apis/paddlepaddle/v1alpha1"
 	"github.com/baidu/paddle-on-k8s-operator/pkg/updater"
 	"github.com/stretchr/testify/assert"
 

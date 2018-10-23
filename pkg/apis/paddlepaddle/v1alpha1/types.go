@@ -1,11 +1,12 @@
-package v1
+package v1alpha1
 
 import (
 	"fmt"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	v1beta1 "k8s.io/api/extensions/v1beta1"
+	"k8s.io/api/extensions/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -19,7 +20,7 @@ const (
 	// CRDGroup is the name of group.
 	CRDGroup = "paddlepaddle.org"
 	// CRDVersion is the version of CRD.
-	CRDVersion = "v1"
+	CRDVersion = "v1alpha1"
 )
 
 // CRDName returns name of crd
@@ -34,32 +35,42 @@ func CRDName() string {
 
 // TrainingJob is a specification for a TrainingJob resource
 type TrainingJob struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
-	Spec              TrainingJobSpec   `json:"spec"`
-	Status            TrainingJobStatus `json:"status"`
+	metav1.TypeMeta             `json:",inline"`
+	metav1.ObjectMeta           `json:"metadata,omitempty"`
+	Spec      TrainingJobSpec   `json:"spec"`
+	Status    TrainingJobStatus `json:"status"`
+	StartTime time.Time         `json:"startTime"`
 }
 
 // TrainingJobSpec is the spec for a TrainingJob resource
 type TrainingJobSpec struct {
 	// General job attributes.
-	Image string `json:"image,omitempty"`
-	// If you want to use the hostnetwork instead of container network
-	// portmanager is necessary. About portmanager, please refer to
-	// https://github.com/PaddlePaddle/cloud/blob/develop/doc/hostnetwork/hostnetwork.md
-	HostNetwork       bool                 `json:"host_network,omitempty"`
-	Port              int                  `json:"port,omitempty"`
-	PortsNum          int                  `json:"ports_num,omitempty"`
-	PortsNumForSparse int                  `json:"ports_num_for_sparse,omitempty"`
-	FaultTolerant     bool                 `json:"fault_tolerant,omitempty"`
-	Passes            int                  `json:"passes,omitempty"`
+	Image             string               `json:"image"`
+	HostNetwork       bool                 `json:"host_network"`
+	Port              int                  `json:"port"`
+	PortsNum          int                  `json:"ports_num"`
+	PortsNumForSparse int                  `json:"ports_num_for_sparse"`
+	TrainerPort       int                  `json:"trainer_port"`
+	TrainerPortsNum   int                  `json:"trainer_ports_num"`
+	FaultTolerant     bool                 `json:"fault_tolerant"`
+	LocalJob          bool                 `json:"local_job"` // LocalJob indicates if the job is local job or cluster job
+	Passes            int                  `json:"passes"`
 	Volumes           []corev1.Volume      `json:"volumes"`
 	VolumeMounts      []corev1.VolumeMount `json:"VolumeMounts"`
-	//TODO(m3ngyang) simplify the structure of sub-resource(mengyang)
+
+	// TODO how to use these two params in matrix
+	Mountpath string `json:"mountpath"`
+	Nfsmount  string `json:"nfsmount"`
+
+	Annotations Annotations `json:"annotations"`
+
 	//TrainingJob components.
 	Master  MasterSpec  `json:"master"`
 	Pserver PserverSpec `json:"pserver"`
 	Trainer TrainerSpec `json:"trainer"`
+
+	IsNccl    bool       `json:"is_nccl"`
+	FrameWork *Framework `json:"frame_work"`
 	//Scheduling components.
 	SchedulerName string `json:"schedulerName,omitempty"`
 	PodGroupName  string `json:"podGroupName,omitempty"`
@@ -73,26 +84,54 @@ type MasterSpec struct {
 	EtcdEndpoint string                      `json:"etcd-endpoint"`
 	Resources    corev1.ResourceRequirements `json:"resources"`
 	ReplicaSpec  *v1beta1.ReplicaSet         `json:"replicaSpec"`
+	Envs         map[string]string           `json:"envs"`
+
+	//for preStop
+	GracePeriodSeconds *int64              `json:"grace_period_seconds"`
+	PreStopCmd         []string            `json:"pre_stop_cmd"`
+	Tolerations        []corev1.Toleration `json:"tolerations"`
+	NodeSelector       map[string]string   `json:"node_selector"`
+	LivenessProbe      *corev1.Probe       `json:"liveness_probe"`
+	ReadinessProbe     *corev1.Probe       `json:"readiness_probe"`
 }
 
 // PserverSpec is the spec for pservers in the paddle job
 type PserverSpec struct {
-	Entrypoint  string                      `json:"entrypoint"`
-	MinInstance int                         `json:"min-instance"`
-	MaxInstance int                         `json:"max-instance"`
-	Resources   corev1.ResourceRequirements `json:"resources"`
-	ReplicaSpec *v1beta1.ReplicaSet         `json:"replicaSpec"`
+	Entrypoint       string                        `json:"entrypoint"`
+	MinInstance      int                           `json:"min-instance"`
+	MaxInstance      int                           `json:"max-instance"`
+	Resources        corev1.ResourceRequirements   `json:"resources"`
+	ReplicaSpec      *v1beta1.ReplicaSet           `json:"replicaSpec"`
+	ImagePullSecrets []corev1.LocalObjectReference `json:"imagePullSecrets"`
+	Envs             map[string]string             `json:"envs"`
+	//for preStop
+	GracePeriodSeconds *int64              `json:"grace_period_seconds"`
+	PreStopCmd         []string            `json:"pre_stop_cmd"`
+	Tolerations        []corev1.Toleration `json:"tolerations"`
+	NodeSelector       map[string]string   `json:"node_selector"`
+	LivenessProbe      *corev1.Probe       `json:"liveness_probe"`
+	ReadinessProbe     *corev1.Probe       `json:"readiness_probe"`
 }
 
 // TrainerSpec is the spec for trainers in the paddle job
 type TrainerSpec struct {
-	EtcdEndpoint string                      `json:"etcd-endpoint"`
-	Entrypoint   string                      `json:"entrypoint"`
-	Workspace    string                      `json:"workspace"`
-	MinInstance  int                         `json:"min-instance"`
-	MaxInstance  int                         `json:"max-instance"`
-	Resources    corev1.ResourceRequirements `json:"resources"`
-	ReplicaSpec  *batchv1.Job                `json:"replicaSpec"`
+	EtcdEndpoint     string                        `json:"etcd-endpoint"`
+	Entrypoint       string                        `json:"entrypoint"`
+	Workspace        string                        `json:"workspace"`
+	MinInstance      int                           `json:"min-instance"`
+	MaxInstance      int                           `json:"max-instance"`
+	Resources        corev1.ResourceRequirements   `json:"resources"`
+	ReplicaSpec      *batchv1.Job                  `json:"replicaSpec"`
+	ImagePullSecrets []corev1.LocalObjectReference `json:"imagePullSecrets"`
+	Envs             map[string]string             `json:"envs"`
+	//for preStop
+	GracePeriodSeconds *int64              `json:"grace_period_seconds"`
+	PreStopCmd         []string            `json:"pre_stop_cmd"`
+	Tolerations        []corev1.Toleration `json:"tolerations"`
+	NodeSelector       map[string]string   `json:"node_selector"`
+	IndexSucceed       bool                `json:"index_succeed"`
+	LivenessProbe      *corev1.Probe       `json:"liveness_probe"`
+	ReadinessProbe     *corev1.Probe       `json:"readiness_probe"`
 }
 
 // TrainingJobPhase is the phase of TrainingJob
@@ -102,15 +141,17 @@ const (
 	// TrainingJobPhaseNone is empty TrainingJobPhase.
 	TrainingJobPhaseNone TrainingJobPhase = ""
 	// TrainingJobPhaseCreating is creating TrainingJobPhase.
-	TrainingJobPhaseCreating = "creating"
+	TrainingJobPhaseCreating = "Creating"
 	// TrainingJobPhaseRunning is running TrainingJobPhase.
-	TrainingJobPhaseRunning = "running"
+	TrainingJobPhaseRunning = "Running"
 	// TrainingJobPhaseScaling is scaling TrainingJobPhase.
-	TrainingJobPhaseScaling = "scaling"
+	TrainingJobPhaseScaling = "Scaling"
 	// TrainingJobPhaseSucceeded is succeeded TrainingJobPhase.
-	TrainingJobPhaseSucceeded = "succeeded"
+	TrainingJobPhaseSucceeded = "Succeed"
 	// TrainingJobPhaseFailed is failed TrainingJobPhase.
-	TrainingJobPhaseFailed = "failed"
+	TrainingJobPhaseFailed = "Failed"
+	// TrainingJobPhaseTimeout is failed TrainingJobPhase.
+	TrainingJobPhaseTimeout = "Timeout"
 )
 
 // ScaleResults is the result of scale
@@ -205,3 +246,31 @@ type TrainingJobList struct {
 	// Items means the list of paddle job/TrainingJob
 	Items []TrainingJob `json:"items"`
 }
+
+type Annotations struct {
+	Usergroupid string `json:"usergroupid"`
+	Userid      string `json:"userid"`
+	Priority    string `json:"priority"`
+	Scheduler   string `json:"scheduler"`
+	Walltime    int    `json:"walltime"`
+}
+
+type Framework struct {
+	Name FrameworkName `json:"name"`
+	Type JobType       `json:"type"`
+}
+
+type FrameworkName string
+
+const (
+	Paddle     FrameworkName = "paddle"
+	TensorFlow               = "tensorflow"
+)
+
+type JobType string
+
+const (
+	Local JobType = "local"
+	Nccl2         = "nccl2"
+	Multi         = "multi"
+)

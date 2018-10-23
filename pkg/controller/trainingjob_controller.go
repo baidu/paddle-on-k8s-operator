@@ -20,12 +20,12 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
 
-	paddlev1 "github.com/baidu/paddle-on-k8s-operator/pkg/apis/paddlepaddle/v1"
+	paddlev1 "github.com/baidu/paddle-on-k8s-operator/pkg/apis/paddlepaddle/v1alpha1"
 	"github.com/baidu/paddle-on-k8s-operator/pkg/autoscaler"
 	paddleclientset "github.com/baidu/paddle-on-k8s-operator/pkg/client/clientset/versioned"
 	paddlescheme "github.com/baidu/paddle-on-k8s-operator/pkg/client/clientset/versioned/scheme"
 	paddleinformers "github.com/baidu/paddle-on-k8s-operator/pkg/client/informers/externalversions"
-	paddlelisters "github.com/baidu/paddle-on-k8s-operator/pkg/client/listers/paddlepaddle/v1"
+	paddlelisters "github.com/baidu/paddle-on-k8s-operator/pkg/client/listers/paddlepaddle/v1alpha1"
 	"github.com/baidu/paddle-on-k8s-operator/pkg/updater"
 )
 
@@ -53,6 +53,12 @@ type TrainingJobController struct {
 
 	// autoclean means whether or not cleaning pods after termination.
 	autoclean bool
+
+	//restartLimit means pserver restart count reach to limit
+	restartLimit int
+
+	//outter meas if operator runs out of baidu
+	outter bool
 }
 
 // New returns a TrainingJobController object
@@ -61,9 +67,9 @@ func New(
 	apiCli apiextensionsclient.Interface,
 	paddleCli paddleclientset.Interface,
 	tjInformer paddleinformers.SharedInformerFactory,
-	auto bool) *TrainingJobController {
+	auto bool, restartLimit int, outter bool) *TrainingJobController {
 
-	traingingjobInformer := tjInformer.Paddlepaddle().V1().TrainingJobs()
+	traingingjobInformer := tjInformer.Paddlepaddle().V1alpha1().TrainingJobs()
 
 	paddlescheme.AddToScheme(scheme.Scheme)
 	log.Debug("Creating trainingjob event broadcaster")
@@ -82,6 +88,8 @@ func New(
 		workqueue:         workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "TrainingJob"),
 		recorder:          recorder,
 		autoclean:         auto,
+		restartLimit:      restartLimit,
+		outter:            outter,
 	}
 
 	log.Info("Setting up event handlers")
@@ -146,6 +154,9 @@ func (c *TrainingJobController) Run(threadiness int, maxLoadDesired float64, sto
 	for i := 0; i < threadiness; i++ {
 		go wait.Until(c.runWorker, time.Second, stopCh)
 	}
+
+	gc := NewGarbageCollector(c.kubeCli, c.trainingjobLister)
+	go gc.CleanOrphans(10 * time.Minute)
 
 	log.Info("Started workers")
 
@@ -257,7 +268,7 @@ func (c *TrainingJobController) syncHandler(key string) (bool, error) {
 			return true, fmt.Errorf("JobNotExists")
 		}
 		log.Debug("TrainingJob new", "namespace", job.Namespace, "name", job.Name)
-		nj := updater.NewJobUpdater(job, c.kubeCli, c.paddleCli, c.autoclean)
+		nj := updater.NewJobUpdater(job, c.kubeCli, c.paddleCli, c.autoclean, c.restartLimit, c.outter)
 		c.jobtracker.Store(key, nj)
 		jobUpdater = nj
 	} else {

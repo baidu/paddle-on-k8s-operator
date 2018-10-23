@@ -15,7 +15,7 @@ limitations under the License.
 */package fake
 
 import (
-	paddlepaddle_v1 "github.com/baidu/paddle-on-k8s-operator/pkg/apis/paddlepaddle/v1"
+	v1alpha1 "github.com/baidu/paddle-on-k8s-operator/pkg/apis/paddlepaddle/v1alpha1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	labels "k8s.io/apimachinery/pkg/labels"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"
@@ -26,29 +26,29 @@ import (
 
 // FakeTrainingJobs implements TrainingJobInterface
 type FakeTrainingJobs struct {
-	Fake *FakePaddlepaddleV1
+	Fake *FakePaddlepaddleV1alpha1
 	ns   string
 }
 
-var trainingjobsResource = schema.GroupVersionResource{Group: "paddlepaddle.org", Version: "v1", Resource: "trainingjobs"}
+var trainingjobsResource = schema.GroupVersionResource{Group: "paddlepaddle.org", Version: "v1alpha1", Resource: "trainingjobs"}
 
-var trainingjobsKind = schema.GroupVersionKind{Group: "paddlepaddle.org", Version: "v1", Kind: "TrainingJob"}
+var trainingjobsKind = schema.GroupVersionKind{Group: "paddlepaddle.org", Version: "v1alpha1", Kind: "TrainingJob"}
 
 // Get takes name of the trainingJob, and returns the corresponding trainingJob object, and an error if there is any.
-func (c *FakeTrainingJobs) Get(name string, options v1.GetOptions) (result *paddlepaddle_v1.TrainingJob, err error) {
+func (c *FakeTrainingJobs) Get(name string, options v1.GetOptions) (result *v1alpha1.TrainingJob, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewGetAction(trainingjobsResource, c.ns, name), &paddlepaddle_v1.TrainingJob{})
+		Invokes(testing.NewGetAction(trainingjobsResource, c.ns, name), &v1alpha1.TrainingJob{})
 
 	if obj == nil {
 		return nil, err
 	}
-	return obj.(*paddlepaddle_v1.TrainingJob), err
+	return obj.(*v1alpha1.TrainingJob), err
 }
 
 // List takes label and field selectors, and returns the list of TrainingJobs that match those selectors.
-func (c *FakeTrainingJobs) List(opts v1.ListOptions) (result *paddlepaddle_v1.TrainingJobList, err error) {
+func (c *FakeTrainingJobs) List(opts v1.ListOptions) (result *v1alpha1.TrainingJobList, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewListAction(trainingjobsResource, trainingjobsKind, c.ns, opts), &paddlepaddle_v1.TrainingJobList{})
+		Invokes(testing.NewListAction(trainingjobsResource, trainingjobsKind, c.ns, opts), &v1alpha1.TrainingJobList{})
 
 	if obj == nil {
 		return nil, err
@@ -58,8 +58,8 @@ func (c *FakeTrainingJobs) List(opts v1.ListOptions) (result *paddlepaddle_v1.Tr
 	if label == nil {
 		label = labels.Everything()
 	}
-	list := &paddlepaddle_v1.TrainingJobList{}
-	for _, item := range obj.(*paddlepaddle_v1.TrainingJobList).Items {
+	list := &v1alpha1.TrainingJobList{}
+	for _, item := range obj.(*v1alpha1.TrainingJobList).Items {
 		if label.Matches(labels.Set(item.Labels)) {
 			list.Items = append(list.Items, item)
 		}
@@ -75,31 +75,31 @@ func (c *FakeTrainingJobs) Watch(opts v1.ListOptions) (watch.Interface, error) {
 }
 
 // Create takes the representation of a trainingJob and creates it.  Returns the server's representation of the trainingJob, and an error, if there is any.
-func (c *FakeTrainingJobs) Create(trainingJob *paddlepaddle_v1.TrainingJob) (result *paddlepaddle_v1.TrainingJob, err error) {
+func (c *FakeTrainingJobs) Create(trainingJob *v1alpha1.TrainingJob) (result *v1alpha1.TrainingJob, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewCreateAction(trainingjobsResource, c.ns, trainingJob), &paddlepaddle_v1.TrainingJob{})
+		Invokes(testing.NewCreateAction(trainingjobsResource, c.ns, trainingJob), &v1alpha1.TrainingJob{})
 
 	if obj == nil {
 		return nil, err
 	}
-	return obj.(*paddlepaddle_v1.TrainingJob), err
+	return obj.(*v1alpha1.TrainingJob), err
 }
 
 // Update takes the representation of a trainingJob and updates it. Returns the server's representation of the trainingJob, and an error, if there is any.
-func (c *FakeTrainingJobs) Update(trainingJob *paddlepaddle_v1.TrainingJob) (result *paddlepaddle_v1.TrainingJob, err error) {
+func (c *FakeTrainingJobs) Update(trainingJob *v1alpha1.TrainingJob) (result *v1alpha1.TrainingJob, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewUpdateAction(trainingjobsResource, c.ns, trainingJob), &paddlepaddle_v1.TrainingJob{})
+		Invokes(testing.NewUpdateAction(trainingjobsResource, c.ns, trainingJob), &v1alpha1.TrainingJob{})
 
 	if obj == nil {
 		return nil, err
 	}
-	return obj.(*paddlepaddle_v1.TrainingJob), err
+	return obj.(*v1alpha1.TrainingJob), err
 }
 
 // Delete takes name of the trainingJob and deletes it. Returns an error if one occurs.
 func (c *FakeTrainingJobs) Delete(name string, options *v1.DeleteOptions) error {
 	_, err := c.Fake.
-		Invokes(testing.NewDeleteAction(trainingjobsResource, c.ns, name), &paddlepaddle_v1.TrainingJob{})
+		Invokes(testing.NewDeleteAction(trainingjobsResource, c.ns, name), &v1alpha1.TrainingJob{})
 
 	return err
 }
@@ -108,17 +108,17 @@ func (c *FakeTrainingJobs) Delete(name string, options *v1.DeleteOptions) error 
 func (c *FakeTrainingJobs) DeleteCollection(options *v1.DeleteOptions, listOptions v1.ListOptions) error {
 	action := testing.NewDeleteCollectionAction(trainingjobsResource, c.ns, listOptions)
 
-	_, err := c.Fake.Invokes(action, &paddlepaddle_v1.TrainingJobList{})
+	_, err := c.Fake.Invokes(action, &v1alpha1.TrainingJobList{})
 	return err
 }
 
 // Patch applies the patch and returns the patched trainingJob.
-func (c *FakeTrainingJobs) Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *paddlepaddle_v1.TrainingJob, err error) {
+func (c *FakeTrainingJobs) Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1alpha1.TrainingJob, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewPatchSubresourceAction(trainingjobsResource, c.ns, name, data, subresources...), &paddlepaddle_v1.TrainingJob{})
+		Invokes(testing.NewPatchSubresourceAction(trainingjobsResource, c.ns, name, data, subresources...), &v1alpha1.TrainingJob{})
 
 	if obj == nil {
 		return nil, err
 	}
-	return obj.(*paddlepaddle_v1.TrainingJob), err
+	return obj.(*v1alpha1.TrainingJob), err
 }

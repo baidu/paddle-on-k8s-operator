@@ -19,7 +19,7 @@ package externalversions
 
 import (
 	"fmt"
-	v1 "github.com/baidu/paddle-on-k8s-operator/pkg/apis/paddlepaddle/v1"
+	v1alpha1 "github.com/baidu/paddle-on-k8s-operator/pkg/apis/paddlepaddle/v1alpha1"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"
 	cache "k8s.io/client-go/tools/cache"
 )
@@ -50,9 +50,9 @@ func (f *genericInformer) Lister() cache.GenericLister {
 // TODO extend this to unknown resources with a client pool
 func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource) (GenericInformer, error) {
 	switch resource {
-	// Group=Paddlepaddle, Version=V1
-	case v1.SchemeGroupVersion.WithResource("trainingjobs"):
-		return &genericInformer{resource: resource.GroupResource(), informer: f.Paddlepaddle().V1().TrainingJobs().Informer()}, nil
+	// Group=Paddlepaddle, Version=V1alpha1
+	case v1alpha1.SchemeGroupVersion.WithResource("trainingjobs"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Paddlepaddle().V1alpha1().TrainingJobs().Informer()}, nil
 
 	}
 

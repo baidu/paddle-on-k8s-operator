@@ -12,31 +12,31 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
-*/package v1
+*/package v1alpha1
 
 import (
-	v1 "github.com/baidu/paddle-on-k8s-operator/pkg/apis/paddlepaddle/v1"
+	v1alpha1 "github.com/baidu/paddle-on-k8s-operator/pkg/apis/paddlepaddle/v1alpha1"
 	"github.com/baidu/paddle-on-k8s-operator/pkg/client/clientset/versioned/scheme"
 	serializer "k8s.io/apimachinery/pkg/runtime/serializer"
 	rest "k8s.io/client-go/rest"
 )
 
-type PaddlepaddleV1Interface interface {
+type PaddlepaddleV1alpha1Interface interface {
 	RESTClient() rest.Interface
 	TrainingJobsGetter
 }
 
-// PaddlepaddleV1Client is used to interact with features provided by the paddlepaddle.org group.
-type PaddlepaddleV1Client struct {
+// PaddlepaddleV1alpha1Client is used to interact with features provided by the paddlepaddle.org group.
+type PaddlepaddleV1alpha1Client struct {
 	restClient rest.Interface
 }
 
-func (c *PaddlepaddleV1Client) TrainingJobs(namespace string) TrainingJobInterface {
+func (c *PaddlepaddleV1alpha1Client) TrainingJobs(namespace string) TrainingJobInterface {
 	return newTrainingJobs(c, namespace)
 }
 
-// NewForConfig creates a new PaddlepaddleV1Client for the given config.
-func NewForConfig(c *rest.Config) (*PaddlepaddleV1Client, error) {
+// NewForConfig creates a new PaddlepaddleV1alpha1Client for the given config.
+func NewForConfig(c *rest.Config) (*PaddlepaddleV1alpha1Client, error) {
 	config := *c
 	if err := setConfigDefaults(&config); err != nil {
 		return nil, err
@@ -45,12 +45,12 @@ func NewForConfig(c *rest.Config) (*PaddlepaddleV1Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &PaddlepaddleV1Client{client}, nil
+	return &PaddlepaddleV1alpha1Client{client}, nil
 }
 
-// NewForConfigOrDie creates a new PaddlepaddleV1Client for the given config and
+// NewForConfigOrDie creates a new PaddlepaddleV1alpha1Client for the given config and
 // panics if there is an error in the config.
-func NewForConfigOrDie(c *rest.Config) *PaddlepaddleV1Client {
+func NewForConfigOrDie(c *rest.Config) *PaddlepaddleV1alpha1Client {
 	client, err := NewForConfig(c)
 	if err != nil {
 		panic(err)
@@ -58,13 +58,13 @@ func NewForConfigOrDie(c *rest.Config) *PaddlepaddleV1Client {
 	return client
 }
 
-// New creates a new PaddlepaddleV1Client for the given RESTClient.
-func New(c rest.Interface) *PaddlepaddleV1Client {
-	return &PaddlepaddleV1Client{c}
+// New creates a new PaddlepaddleV1alpha1Client for the given RESTClient.
+func New(c rest.Interface) *PaddlepaddleV1alpha1Client {
+	return &PaddlepaddleV1alpha1Client{c}
 }
 
 func setConfigDefaults(config *rest.Config) error {
-	gv := v1.SchemeGroupVersion
+	gv := v1alpha1.SchemeGroupVersion
 	config.GroupVersion = &gv
 	config.APIPath = "/apis"
 	config.NegotiatedSerializer = serializer.DirectCodecFactory{CodecFactory: scheme.Codecs}
@@ -78,7 +78,7 @@ func setConfigDefaults(config *rest.Config) error {
 
 // RESTClient returns a RESTClient that is used to communicate
 // with API server by this client implementation.
-func (c *PaddlepaddleV1Client) RESTClient() rest.Interface {
+func (c *PaddlepaddleV1alpha1Client) RESTClient() rest.Interface {
 	if c == nil {
 		return nil
 	}
