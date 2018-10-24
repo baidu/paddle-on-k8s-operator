@@ -20,11 +20,6 @@ For detailed api specifications, please check out [Api](docs/api.md).
 
 The Paddle Operator tries to run PaddlePaddle training job as native as other workloads on Kubernetes. It relies on CRD for specifying the PaddlePaddle training job.
 
-Features including:
-
-* Paddle training job instance auto scaling according to resource utilization
-* Paddle training job instance fault tolerant
-
 ## Contributing
 
 For contributing to this project, please check out [CONTRIBUTING](CONTRIBUTING.md) first, then check out [Developer Guide](docs/developer-guide.md).
