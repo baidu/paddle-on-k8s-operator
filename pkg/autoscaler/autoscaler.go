@@ -382,12 +382,12 @@ func (a *Autoscaler) findPendingJob() bool {
 	// TODO(m3ngyang) add a pending status for TrainingJob
 	// how to define a pending job? no trainer pod is scheduled?
 	traverseFunc := func(k, v interface{}) bool {
-		log.Debug("findPendingJob check", "jobname", k)
+		log.Debug("Find pendingJob check", "jobname", k)
 		total := 0
 		pending := 0
 		up, ok := v.(*updater.JobUpdater)
 		if !ok {
-			log.Debug("findPendingJob conversion error", "jobname", k)
+			log.Debug("Find pendingJob conversion error", "jobname", k)
 		}
 		job := up.Job
 
@@ -401,7 +401,7 @@ func (a *Autoscaler) findPendingJob() bool {
 
 		pods, err := a.kubeCli.CoreV1().Pods(job.Namespace).List(metav1.ListOptions{LabelSelector: labelKey + "=" + job.Name})
 		if err != nil {
-			log.Error("findPendingJob failed to list job pods", "error", err)
+			log.Error("Find pendingJob failed to list job pods", "error", err)
 			return true
 		}
 		for _, pod := range pods.Items {
@@ -414,7 +414,7 @@ func (a *Autoscaler) findPendingJob() bool {
 			}
 		}
 		if total == pending && total != 0 {
-			log.Debug("findPendingJob", "jobName", job.Name, "totalNum", total)
+			log.Debug("Find pendingJob", "jobName", job.Name, "totalNum", total)
 			havePending = true
 			return false
 		}

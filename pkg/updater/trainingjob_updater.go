@@ -8,6 +8,7 @@ import (
 	"time"
 	"strings"
 
+	"github.com/golang/glog"
 	log "github.com/inconshreveable/log15"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/api/extensions/v1beta1"
@@ -45,7 +46,7 @@ type JobUpdater struct {
 func NewJobUpdater(job *paddlev1.TrainingJob, kubeCli kubernetes.Interface, jobCli trainingJobClient.Interface,
 	auto bool, restartLimit int, outter bool) *JobUpdater {
 	eventBroadcaster := record.NewBroadcaster()
-	eventBroadcaster.StartLogging(log.Info)
+	eventBroadcaster.StartLogging(glog.Infof)
 	eventBroadcaster.StartRecordingToSink(&typedcorev1.EventSinkImpl{Interface: kubeCli.CoreV1().Events("")})
 	recorder := eventBroadcaster.NewRecorder(scheme.Scheme, corev1.EventSource{Component: "TrainingJobController"})
 
