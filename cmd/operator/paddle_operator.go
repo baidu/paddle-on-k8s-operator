@@ -41,6 +41,7 @@ func main() {
 	inCluster := flag.Bool("incluster", false, "Controller runs in cluster or out of cluster.")
 	logLevel := flag.Int("loglevel", 4, "Log level of operator.")
 	outter := flag.Bool("outter", false, "If this is a opensource version.")
+	threadNum := flag.Int("thread", 10, "Thread num of work")
 
 	flag.Parse()
 
@@ -79,7 +80,7 @@ func main() {
 			*restartLimit, *outter)
 		go paddleInformer.Start(stopCh)
 
-		if controller.Run(1, *maxLoadDesired, stopCh); err != nil {
+		if controller.Run(*threadNum, *maxLoadDesired, stopCh); err != nil {
 			log.Error("Error running paddle trainingjob controller", "error", err.Error())
 			return
 		}

@@ -88,6 +88,16 @@ func (j *JobUpdater) FullName() string {
 	return fmt.Sprintf("%s/%s", j.Job.Namespace, j.Job.Name)
 }
 
+// IsReleased returns if tj has released resource
+func (j *JobUpdater) IsReleased() bool {
+	return j.Job.Released
+}
+
+// SetReleased set resource of job released
+func (j *JobUpdater) SetReleased(release bool) {
+	j.Job.Released = true
+}
+
 func (j *JobUpdater) masterName() string {
 	return fmt.Sprintf("%s/%s", j.Job.Namespace, j.Job.Spec.Master.ReplicaSpec.Name)
 }
@@ -102,6 +112,7 @@ func (j *JobUpdater) trainerName() string {
 
 // Reconcile tries to get the job into the desired state
 func (j *JobUpdater) Reconcile() error {
+	released := j.IsReleased()
 	log.Info("Reconciling TrainingJob", "job", j.FullName(), "current status phase", j.Job.Status.Phase)
 
 	if j.Job.ObjectMeta.DeletionTimestamp != nil {
@@ -119,7 +130,7 @@ func (j *JobUpdater) Reconcile() error {
 			j.status.Phase = paddlev1.TrainingJobPhaseCreating
 			log.Info("Finish setting up TrainingJob", "job", j.FullName())
 		}
-		if err := j.updateCRDStatus(); err != nil {
+		if err := j.updateCRDStatus(released); err != nil {
 			log.Error("Error updating TrainingJob", "job", j.FullName(), "err", err.Error())
 			return err
 		}
@@ -135,7 +146,7 @@ func (j *JobUpdater) Reconcile() error {
 			log.Info("Finish creating TrainingJob", "job", j.FullName())
 		}
 
-		if err := j.updateCRDStatus(); err != nil {
+		if err := j.updateCRDStatus(released); err != nil {
 			log.Error("Error updating TrainingJob", "job", j.FullName(), "err", err.Error())
 			return err
 		}
@@ -155,7 +166,7 @@ func (j *JobUpdater) Reconcile() error {
 			log.Info("Job started", "job", j.FullName(), "time", j.Job.StartTime.Format("2018-01-01 23:00:00"))
 		}
 
-		if err := j.updateCRDStatus(); err != nil {
+		if err := j.updateCRDStatus(released); err != nil {
 			log.Error("Error updating TrainingJob", "job", j.FullName(), "err", err.Error())
 			return err
 		}
@@ -186,7 +197,7 @@ func (j *JobUpdater) Reconcile() error {
 
 		j.status.Phase = phase
 		j.status.Reason = reason
-		if err := j.updateCRDStatus(); err != nil {
+		if err := j.updateCRDStatus(released); err != nil {
 			log.Error("Update trainingjob error", "job", j.FullName(), "err", err.Error())
 			return err
 		}
@@ -209,7 +220,7 @@ func (j *JobUpdater) Reconcile() error {
 
 		j.status.Phase = phase
 		j.status.Reason = reason
-		if err := j.updateCRDStatus(); err != nil {
+		if err := j.updateCRDStatus(released); err != nil {
 			log.Error("Error updating TrainingJob", "job", j.FullName(), "err", err.Error())
 			return err
 		}
@@ -233,6 +244,7 @@ func (j *JobUpdater) Reconcile() error {
 			log.Info("Finish releasing TrainingJob master/pserver resource", "job", j.FullName())
 
 			j.recorder.Event(j.Job, corev1.EventTypeNormal, "Terminated", "All pods cleaned")
+			j.SetReleased(true)
 		} else {
 			j.recorder.Event(j.Job, corev1.EventTypeNormal, "Terminated", "All pods kept")
 		}
@@ -264,7 +276,7 @@ findFailedPserver:
 		}
 	}
 
-	if err := j.updateCRDStatus(); err != nil {
+	if err := j.updateCRDStatus(released); err != nil {
 		log.Error("Error updating TrainingJob", "job", j.FullName(), "err", err.Error())
 		return err
 	}
@@ -309,10 +321,10 @@ func (j *JobUpdater) setup() error {
 	return err
 }
 
-func (j *JobUpdater) updateCRDStatus() error {
+func (j *JobUpdater) updateCRDStatus(released bool) error {
 	log.Debug("Updating TrainingJob status", "job", j.FullName(), "former status", j.Job.Status, "current status",
 		j.status)
-	if reflect.DeepEqual(j.status, j.Job.Status) {
+	if reflect.DeepEqual(j.status, j.Job.Status) && released == j.IsReleased() {
 		log.Debug("Update TrainingJob skipped", "job", j.FullName(), "status", j.status)
 		return nil
 	}
@@ -373,8 +385,11 @@ func (j *JobUpdater) GetStatus() (paddlev1.TrainingJobPhase, string, error) {
 			for _, pod := range failedPods {
 				podNameList = append(podNameList, pod.Name)
 				podNodeList = append(podNodeList, pod.Status.HostIP)
-				podReasonList = append(podReasonList, fmt.Sprint(pod.Status.ContainerStatuses[0].State))
 
+				status := pod.Status.ContainerStatuses
+				if len(status) > 0 {
+					podReasonList = append(podReasonList, fmt.Sprint(status[0].State))
+				}
 			}
 
 			phase = paddlev1.TrainingJobPhaseFailed
