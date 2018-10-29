@@ -298,6 +298,12 @@ func (c *TrainingJobController) syncHandler(key string) (bool, error) {
 		}
 	}
 
+	if jobUpdater.IsReleased() {
+		log.Info("Ignore reconciling", "namespace", job.Namespace, "job", job.Name,
+			"since whose resource has been released")
+		return false, nil
+	}
+
 	if err := jobUpdater.Reconcile(); err != nil {
 		log.Error("Error reconciling", "namespace", job.Namespace, "name", job.Name, "err", err.Error())
 		return false, err

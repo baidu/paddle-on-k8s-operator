@@ -40,6 +40,7 @@ type TrainingJob struct {
 	Spec      TrainingJobSpec   `json:"spec"`
 	Status    TrainingJobStatus `json:"status"`
 	StartTime time.Time         `json:"startTime"`
+	Released  bool              `json:"released"`
 }
 
 // TrainingJobSpec is the spec for a TrainingJob resource
