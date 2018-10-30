@@ -5,7 +5,7 @@ metadata:
   namespace: default
 spec:
   #paddle image with training script
-  image: "paddlepaddle/paddlecloud-job"
+  image: "hub.baidubce.com/jpaas-public/paddlejob-mock"
   # base port of pserver
   port: 7164
   # ports num default 1
@@ -34,9 +34,8 @@ spec:
         cpu: "100m"
         memory: "100Mi"
   trainer:
-    #entrypoint: "python train.py"
-    entrypoint: "sleep 100"
-    workspace: "/home/job-1/"
+    entrypoint: "python /root/mock_trainer.py"
+    workspace: "/root/"
     passes: 10
     # max should equal min while fault_tolerant is disable
     min-instance: 2

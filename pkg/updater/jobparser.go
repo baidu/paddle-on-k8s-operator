@@ -60,7 +60,7 @@ func setDefaultAndValidate(job *paddlev1.TrainingJob) error {
 		job.Spec.PortsNumForSparse = 1
 	}
 	if job.Spec.Image == "" {
-		job.Spec.Image = "paddlepaddle/paddlecloud-job"
+		job.Spec.Image = "paddlepaddle/paddlecloud-job:0.11.0"
 	}
 	if job.Spec.Passes == 0 {
 		job.Spec.Passes = 1
@@ -121,15 +121,15 @@ func parseToPserver(job *paddlev1.TrainingJob, extraEnv []corev1.EnvVar, outter 
 					Volumes:       job.Spec.Volumes,
 					Containers: []corev1.Container{
 						corev1.Container{
-							Name:  "pserver",
-							Image: job.Spec.Image,
-							Ports: podPorts(job, PSERVER),
-							Env:   envs,
-							//Command:   command,
-							Resources:      job.Spec.Pserver.Resources,
-							Lifecycle:      parseLifeCycle(job, PSERVER),
-							ReadinessProbe: job.Spec.Pserver.ReadinessProbe,
-							LivenessProbe:  job.Spec.Pserver.LivenessProbe,
+							Name:            "pserver",
+							Image:           job.Spec.Image,
+							Ports:           podPorts(job, PSERVER),
+							Env:             envs,
+							ImagePullPolicy: imagePullPolicy,
+							Resources:       job.Spec.Pserver.Resources,
+							Lifecycle:       parseLifeCycle(job, PSERVER),
+							ReadinessProbe:  job.Spec.Pserver.ReadinessProbe,
+							LivenessProbe:   job.Spec.Pserver.LivenessProbe,
 						},
 					},
 					Tolerations:                   parseTolerations(job, PSERVER),
@@ -232,7 +232,6 @@ func parseToTrainer(job *paddlev1.TrainingJob, extraEnv []corev1.EnvVar, outter 
 		} else {
 			// user-defined start command
 			command = strings.Split(entryPoint, " ")
-
 		}
 		spec.Spec.Template.Spec.Containers[0].Command = command
 	}
@@ -282,8 +281,7 @@ func getEtcdPodSpec(job *paddlev1.TrainingJob) *corev1.Container {
 // parseToMaster parse TrainingJob to a kubernetes replicaset resource.
 func parseToMaster(job *paddlev1.TrainingJob) *v1beta1.ReplicaSet {
 	replicas := int32(1)
-	//command := []string{"paddle_k8s", "start_master"}
-	command := []string{"sleep", "100000"}
+	command := []string{"paddle_k8s", "start_master"}
 
 	return &v1beta1.ReplicaSet{
 		TypeMeta: metav1.TypeMeta{
@@ -601,7 +599,6 @@ func parseTolerations(job *paddlev1.TrainingJob, podType PodType) []corev1.Toler
 	default:
 		return nil
 	}
-	return nil
 }
 
 func (p *DefaultJobParser) ParseToTrainingJob(job *paddlev1.TrainingJob,

@@ -3,14 +3,14 @@ kind: TrainingJob
 metadata:
   name: examplejob
 spec:
-  image: "paddlepaddle/paddlecloud-job"
+  image: "hub.baidubce.com/jpaas-public/paddlejob-mock"
   port: 7164
   ports_num: 1
   ports_num_for_sparse: 1
   fault_tolerant: true
   trainer:
-    entrypoint: "python /workspace/vgg16_v2.py"
-    workspace: "/workspace"
+    entrypoint: "python /root/mock_trainer.py"
+    workspace: "/root"
     passes: 50
     min-instance: 2
     max-instance: 6
