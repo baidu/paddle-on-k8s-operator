@@ -110,9 +110,10 @@ type PserverSpec struct {
 	PreStopCmd         []string            `json:"pre_stop_cmd"`
 	Tolerations        []corev1.Toleration `json:"tolerations"`
 	NodeSelector       map[string]string   `json:"node_selector"`
-	IndexSucceed       bool                `json:"index_succeed"`
-	LivenessProbe      *corev1.Probe       `json:"liveness_probe"`
-	ReadinessProbe     *corev1.Probe       `json:"readiness_probe"`
+	//IndexSucceed marks if the operator has added labels to pservers successfully in the initial phase
+	IndexSucceed   bool          `json:"index_succeed"`
+	LivenessProbe  *corev1.Probe `json:"liveness_probe"`
+	ReadinessProbe *corev1.Probe `json:"readiness_probe"`
 }
 
 // TrainerSpec is the spec for trainers in the paddle job
@@ -131,9 +132,10 @@ type TrainerSpec struct {
 	PreStopCmd         []string            `json:"pre_stop_cmd"`
 	Tolerations        []corev1.Toleration `json:"tolerations"`
 	NodeSelector       map[string]string   `json:"node_selector"`
-	IndexSucceed       bool                `json:"index_succeed"`
-	LivenessProbe      *corev1.Probe       `json:"liveness_probe"`
-	ReadinessProbe     *corev1.Probe       `json:"readiness_probe"`
+	//IndexSucceed marks if the operator has added labels to trainers successfully in the initial phase
+	IndexSucceed   bool          `json:"index_succeed"`
+	LivenessProbe  *corev1.Probe `json:"liveness_probe"`
+	ReadinessProbe *corev1.Probe `json:"readiness_probe"`
 }
 
 // TrainingJobPhase is the phase of TrainingJob
