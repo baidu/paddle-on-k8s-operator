@@ -22,7 +22,6 @@ import (
 	paddlev1 "github.com/baidu/paddle-on-k8s-operator/pkg/apis/paddlepaddle/v1alpha1"
 	trainingJobClient "github.com/baidu/paddle-on-k8s-operator/pkg/client/clientset/versioned"
 	"github.com/baidu/paddle-on-k8s-operator/pkg/client/clientset/versioned/scheme"
-	"baidu/jpaas-ai/paddlecloud/go/pkg/apis/paddlepaddle/v1alpha1"
 )
 
 var (
@@ -811,7 +810,7 @@ func (j *JobUpdater) initLabelOfPods() {
 	}
 
 	frameWork := j.Job.Spec.FrameWork
-	if frameWork != nil && frameWork.Type == v1alpha1.Multi &&
+	if frameWork != nil && frameWork.Type == paddlev1.Multi &&
 		!j.Job.Spec.Pserver.IndexSucceed {
 		success, err := j.addLabelToPods(PSERVER)
 		if err == nil && success {
@@ -888,16 +887,19 @@ func (j *JobUpdater) traceAddLabelToPods(podType PodType) error {
 
 	indexMap := make(map[int]string)
 	unIndexedPod := make([]*corev1.Pod, 0)
+	desiredPodNum := 0
 	var labelOptions v1.ListOptions
 	var podKind string
 	switch podType {
 	case TRAINER:
 		labelOptions = v1.ListOptions{LabelSelector: TrainerLabel + "=" + j.Job.Name}
 		podKind = j.trainerName()
+		desiredPodNum = int(*j.Job.Spec.Trainer.ReplicaSpec.Spec.Parallelism)
 
 	case PSERVER:
 		labelOptions = v1.ListOptions{LabelSelector: PserverLabel + "=" + j.Job.Name}
 		podKind = j.pserverName()
+		desiredPodNum = int(*j.Job.Spec.Pserver.ReplicaSpec.Spec.Replicas)
 
 	}
 	log.Info("Start trace pod", "podKind", podKind)
@@ -932,7 +934,7 @@ func (j *JobUpdater) traceAddLabelToPods(podType PodType) error {
 
 	log.Info("UnIndexed pod", "info", unIndexedPod)
 
-	for id := 0; id < int(*j.Job.Spec.Trainer.ReplicaSpec.Spec.Parallelism); id++ {
+	for id := 0; id < desiredPodNum; id++ {
 		podLen := len(unIndexedPod)
 		if _, exist := indexMap[id]; !exist && podLen > 0 {
 
@@ -948,7 +950,7 @@ func (j *JobUpdater) traceAddLabelToPods(podType PodType) error {
 			}
 
 			if podLen > 1 {
-				unIndexedPod = unIndexedPod[1 : len(indexMap)-1]
+				unIndexedPod = unIndexedPod[1 : len(unIndexedPod)-1]
 			} else {
 				log.Info("Finished trace label of job", "podKind", podKind)
 				break

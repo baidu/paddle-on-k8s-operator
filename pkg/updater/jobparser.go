@@ -189,6 +189,7 @@ func parseToTrainer(job *paddlev1.TrainingJob, extraEnv []corev1.EnvVar, outter 
 		},
 		Spec: batchv1.JobSpec{
 			BackoffLimit: &backoffLimit,
+			Completions:  &replicas,
 			Parallelism:  &replicas,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
