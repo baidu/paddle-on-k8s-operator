@@ -205,18 +205,22 @@ func (gc *GarbageCollector) CleanGarbagePods() {
 			continue
 		}
 
-		containerStatus := false
-		containers := pod.Status.ContainerStatuses
-		for _, container := range containers {
-			if !containerStatus && container.State.Waiting != nil && container.State.Waiting.Reason == "CreateContainerError" {
-				containerStatus = false
+		containerStatusOk := false
+		statuses := pod.Status.ContainerStatuses
+		if len(statuses) == 0 {
+			return
+		}
+		for _, status := range statuses {
+			if !containerStatusOk && status.State.Waiting != nil && status.State.Waiting.
+				Reason == "CreateContainerError" {
+				containerStatusOk = false
 				continue
 			}
 
-			containerStatus = true
+			containerStatusOk = true
 			break
 		}
-		if !containerStatus {
+		if !containerStatusOk {
 			log.Error("Find garbage pod", "name", pod.Name, "reason", "CreateContainerError")
 			err = gc.kubeCli.CoreV1().Pods(pod.Namespace).Delete(pod.Name, &metav1.DeleteOptions{})
 			if err != nil {

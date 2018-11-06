@@ -22,6 +22,7 @@ import (
 	paddlev1 "github.com/baidu/paddle-on-k8s-operator/pkg/apis/paddlepaddle/v1alpha1"
 	trainingJobClient "github.com/baidu/paddle-on-k8s-operator/pkg/client/clientset/versioned"
 	"github.com/baidu/paddle-on-k8s-operator/pkg/client/clientset/versioned/scheme"
+	"baidu/jpaas-ai/paddlecloud/go/pkg/apis/paddlepaddle/v1alpha1"
 )
 
 var (
@@ -174,20 +175,8 @@ func (j *JobUpdater) Reconcile() error {
 
 	if j.Job.Status.Phase == paddlev1.TrainingJobPhaseRunning {
 
-		if !j.Job.Spec.Trainer.IndexSucceed {
-			success, err := j.addLabelToPods()
-			if err == nil && success {
-				j.Job.Spec.Trainer.IndexSucceed = true
-			} else {
-				log.Error("Add label to pods failed")
-			}
-
-		}
-
-		err := j.traceAddLabelToPods()
-		if err != nil {
-			log.Error("Trace pod label to pods failed")
-		}
+		j.initLabelOfPods()
+		go j.traceLabelOfPods()
 
 		phase, reason, err := j.GetStatus()
 		if err != nil {
@@ -251,7 +240,7 @@ func (j *JobUpdater) Reconcile() error {
 	}
 
 	podsList, err := j.kubeCli.CoreV1().Pods(j.Job.Namespace).List(v1.
-	ListOptions{LabelSelector: "paddle-job-pserver=" + j.
+	ListOptions{LabelSelector: PserverLabel + "=" + j.
 		Job.Name})
 	if err != nil {
 		return err
@@ -679,7 +668,7 @@ func (j *JobUpdater) releaseTrainer() error {
 	}
 
 	labels := Labels(map[string]string{
-		"paddle-job": j.Job.Name,
+		TrainerLabel: j.Job.Name,
 	})
 	selector, _ := labels.LabelsParser()
 	options := v1.ListOptions{
@@ -755,7 +744,7 @@ func (j *JobUpdater) trainerTotalRunning() (bool, error) {
 	}
 
 	log.Debug("Trainer status", "namespace", j.Job.Namespace, "name", trainerName, "status", trainers.Status)
-	podsList, err := j.kubeCli.CoreV1().Pods(j.Job.Namespace).List(v1.ListOptions{LabelSelector: "paddle-job=" + j.Job.Name})
+	podsList, err := j.kubeCli.CoreV1().Pods(j.Job.Namespace).List(v1.ListOptions{LabelSelector: TrainerLabel + "=" + j.Job.Name})
 	var runningPodCount int32
 	for _, pod := range podsList.Items {
 		if pod.Status.Phase == corev1.PodRunning || pod.Status.Phase == corev1.PodSucceeded {
@@ -772,7 +761,7 @@ func (j *JobUpdater) trainerTotalRunning() (bool, error) {
 func (j *JobUpdater) findFailedTrainerPods() ([]*corev1.Pod, error) {
 	failedPods := make([]*corev1.Pod, 0)
 
-	podsList, err := j.kubeCli.CoreV1().Pods(j.Job.Namespace).List(v1.ListOptions{LabelSelector: "paddle-job=" + j.Job.Name})
+	podsList, err := j.kubeCli.CoreV1().Pods(j.Job.Namespace).List(v1.ListOptions{LabelSelector: TrainerLabel + "=" + j.Job.Name})
 	if err != nil {
 		return failedPods, err
 	}
@@ -810,10 +799,49 @@ func (j *JobUpdater) scale() (err error) {
 	return nil
 }
 
-func (j *JobUpdater) addLabelToPods() (bool, error) {
+func (j *JobUpdater) initLabelOfPods() {
 
-	podsList, err := j.kubeCli.CoreV1().Pods(j.Job.Namespace).List(v1.ListOptions{LabelSelector: "paddle-job=" + j.
-		Job.Name})
+	if !j.Job.Spec.Trainer.IndexSucceed {
+		success, err := j.addLabelToPods(TRAINER)
+		if err == nil && success {
+			j.Job.Spec.Trainer.IndexSucceed = true
+		} else {
+			log.Error("Add label to trainer failed", "name", j.trainerName())
+		}
+
+	}
+
+	frameWork := j.Job.Spec.FrameWork
+	if frameWork != nil && frameWork.Type == v1alpha1.Multi &&
+		!j.Job.Spec.Pserver.IndexSucceed {
+		success, err := j.addLabelToPods(PSERVER)
+		if err == nil && success {
+			j.Job.Spec.Pserver.IndexSucceed = true
+		} else {
+			log.Error("Add label to pserver failed", "name", j.pserverName())
+		}
+
+	}
+}
+
+func (j *JobUpdater) addLabelToPods(podType PodType) (bool, error) {
+
+	var labelOptions v1.ListOptions
+	var podName string
+	switch podType {
+	case TRAINER:
+		labelOptions = v1.ListOptions{LabelSelector: TrainerLabel + "=" + j.Job.Name}
+		podName = j.trainerName()
+
+	case PSERVER:
+		labelOptions = v1.ListOptions{LabelSelector: PserverLabel + "=" + j.Job.Name}
+		podName = j.pserverName()
+
+	}
+
+	log.Info("Start to add label", "podKind", podName)
+
+	podsList, err := j.kubeCli.CoreV1().Pods(j.Job.Namespace).List(labelOptions)
 	if err != nil {
 		return false, err
 	}
@@ -825,16 +853,16 @@ func (j *JobUpdater) addLabelToPods() (bool, error) {
 		}
 
 		labels := oldPod.GetLabels()
-		labels[j.trainerName()+"-idx"] = strconv.Itoa(idx)
+		labels[podName+"-idx"] = strconv.Itoa(idx)
 		oldPod.SetLabels(labels)
 
 		if _, err := j.kubeCli.CoreV1().Pods(j.Job.Namespace).Update(&oldPod); err != nil {
-			log.Error(fmt.Sprintf("Resource status updated failed", "namespace", j.Job.Namespace, "name", oldPod.Name))
+			log.Error("Resource status updated failed", "namespace", j.Job.Namespace, "pod", oldPod.Name)
 			return false, err
 		}
 
 		if int32(idx) > *j.Job.Spec.Trainer.ReplicaSpec.Spec.Parallelism-1 {
-			log.Warn("Index exceeded parallelism", "index", idx)
+			log.Warn("Idx exceeded parallelism", "current id", idx)
 			break
 		}
 	}
@@ -842,11 +870,40 @@ func (j *JobUpdater) addLabelToPods() (bool, error) {
 	return true, nil
 }
 
-func (j *JobUpdater) traceAddLabelToPods() error {
-	var indexMap = make(map[int]string)
+func (j *JobUpdater) traceLabelOfPods() {
+
+	if err := j.traceAddLabelToPods(TRAINER); err != nil {
+		log.Error("Trace pod label of pods failed, pod kind %s", TRAINER)
+	}
+
+	frameWork := j.Job.Spec.FrameWork
+	if frameWork != nil && frameWork.Type == paddlev1.Multi {
+		if err := j.traceAddLabelToPods(PSERVER); err != nil {
+			log.Error("Trace pod label of pods failed, pod kind %s", PSERVER)
+
+		}
+	}
+}
+
+func (j *JobUpdater) traceAddLabelToPods(podType PodType) error {
+
+	indexMap := make(map[int]string)
 	unIndexedPod := make([]*corev1.Pod, 0)
-	podsList, err := j.kubeCli.CoreV1().Pods(j.Job.Namespace).List(v1.ListOptions{LabelSelector: "paddle-job=" + j.
-		Job.Name})
+	var labelOptions v1.ListOptions
+	var podKind string
+	switch podType {
+	case TRAINER:
+		labelOptions = v1.ListOptions{LabelSelector: TrainerLabel + "=" + j.Job.Name}
+		podKind = j.trainerName()
+
+	case PSERVER:
+		labelOptions = v1.ListOptions{LabelSelector: PserverLabel + "=" + j.Job.Name}
+		podKind = j.pserverName()
+
+	}
+	log.Info("Start trace pod", "podKind", podKind)
+
+	podsList, err := j.kubeCli.CoreV1().Pods(j.Job.Namespace).List(labelOptions)
 	if err != nil {
 		return err
 	}
@@ -862,7 +919,8 @@ func (j *JobUpdater) traceAddLabelToPods() error {
 		}
 		labels := oldPod.GetLabels()
 
-		v, exist := labels[j.trainerName()+"-idx"]
+		log.Info("Pod %s has labels %s", oldPod.Name, labels)
+		v, exist := labels[podKind+"-idx"]
 		if exist {
 			if id, err := strconv.Atoi(v); err == nil {
 				indexMap[id] = oldPod.Name
@@ -874,7 +932,7 @@ func (j *JobUpdater) traceAddLabelToPods() error {
 
 	}
 
-	log.Info("UnIndexed pod info", "pods", unIndexedPod)
+	log.Info("UnIndexed pod info: %+v", unIndexedPod)
 
 	for id := 0; id < int(*j.Job.Spec.Trainer.ReplicaSpec.Spec.Parallelism); id++ {
 		podLen := len(unIndexedPod)
@@ -883,25 +941,25 @@ func (j *JobUpdater) traceAddLabelToPods() error {
 			oldPod := *unIndexedPod[0]
 			indexMap[id] = oldPod.Name
 			labels := oldPod.GetLabels()
-			labels[j.trainerName()+"-idx"] = strconv.Itoa(id)
+			labels[podKind+"-idx"] = strconv.Itoa(id)
 			oldPod.SetLabels(labels)
 
 			if _, err := j.kubeCli.CoreV1().Pods(j.Job.Namespace).Update(&oldPod); err != nil {
-				log.Error("Resource status updated failed", "namespace", j.Job.Namespace, "name", oldPod.Name)
+				log.Error("Resource %s/%s status updated failed", j.Job.Namespace, oldPod.Name)
 				return err
 			}
 
 			if podLen > 1 {
 				unIndexedPod = unIndexedPod[1 : len(indexMap)-1]
 			} else {
-				log.Info("Finished trace label of job:")
+				log.Info("Finished trace label of job:%s", podKind)
 				break
 			}
 
 		}
 	}
 
-	log.Info(fmt.Sprintf("Traced indexMap info: %+v", indexMap))
+	log.Info("Traced indexMap info: %+v", indexMap)
 
 	return nil
 }
