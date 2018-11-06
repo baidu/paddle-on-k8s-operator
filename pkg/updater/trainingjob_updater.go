@@ -254,7 +254,6 @@ findFailedPserver:
 		}
 		log.Info("Find trainingJob", "job", j.FullName())
 		for _, pod := range pod.Status.ContainerStatuses {
-			log.Info("Current time: %d, limit: %d", pod.RestartCount, j.restartLimit)
 			if pod.RestartCount < int32(j.restartLimit) {
 				continue
 			}
@@ -873,13 +872,13 @@ func (j *JobUpdater) addLabelToPods(podType PodType) (bool, error) {
 func (j *JobUpdater) traceLabelOfPods() {
 
 	if err := j.traceAddLabelToPods(TRAINER); err != nil {
-		log.Error("Trace pod label of pods failed, pod kind %s", TRAINER)
+		log.Error("Trace pod label of pods failed", "podKind", TRAINER)
 	}
 
 	frameWork := j.Job.Spec.FrameWork
 	if frameWork != nil && frameWork.Type == paddlev1.Multi {
 		if err := j.traceAddLabelToPods(PSERVER); err != nil {
-			log.Error("Trace pod label of pods failed, pod kind %s", PSERVER)
+			log.Error("Trace pod label of pods failed", "podKind", PSERVER)
 
 		}
 	}
@@ -919,7 +918,6 @@ func (j *JobUpdater) traceAddLabelToPods(podType PodType) error {
 		}
 		labels := oldPod.GetLabels()
 
-		log.Info("Pod %s has labels %s", oldPod.Name, labels)
 		v, exist := labels[podKind+"-idx"]
 		if exist {
 			if id, err := strconv.Atoi(v); err == nil {
@@ -932,7 +930,7 @@ func (j *JobUpdater) traceAddLabelToPods(podType PodType) error {
 
 	}
 
-	log.Info("UnIndexed pod info: %+v", unIndexedPod)
+	log.Info("UnIndexed pod", "info", unIndexedPod)
 
 	for id := 0; id < int(*j.Job.Spec.Trainer.ReplicaSpec.Spec.Parallelism); id++ {
 		podLen := len(unIndexedPod)
@@ -945,21 +943,21 @@ func (j *JobUpdater) traceAddLabelToPods(podType PodType) error {
 			oldPod.SetLabels(labels)
 
 			if _, err := j.kubeCli.CoreV1().Pods(j.Job.Namespace).Update(&oldPod); err != nil {
-				log.Error("Resource %s/%s status updated failed", j.Job.Namespace, oldPod.Name)
+				log.Error("Resource status updated failed", "namespace", j.Job.Namespace, "name", oldPod.Name)
 				return err
 			}
 
 			if podLen > 1 {
 				unIndexedPod = unIndexedPod[1 : len(indexMap)-1]
 			} else {
-				log.Info("Finished trace label of job:%s", podKind)
+				log.Info("Finished trace label of job", "podKind", podKind)
 				break
 			}
 
 		}
 	}
 
-	log.Info("Traced indexMap info: %+v", indexMap)
+	log.Info("Traced indexMap", "index info", indexMap)
 
 	return nil
 }
