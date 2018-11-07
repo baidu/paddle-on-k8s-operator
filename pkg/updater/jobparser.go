@@ -33,9 +33,12 @@ import (
 type PodType string
 
 const (
-	PSERVER PodType = "pserver"
-	TRAINER PodType = "trainer"
-	MASTER  PodType = "master"
+	PSERVER      PodType = "pserver"
+	TRAINER      PodType = "trainer"
+	MASTER       PodType = "master"
+	TrainerLabel         = "paddle-job"
+	PserverLabel         = "paddle-job-pserver"
+	MasterLabel          = "paddle-job-master"
 )
 
 const (
@@ -113,7 +116,7 @@ func parseToPserver(job *paddlev1.TrainingJob, extraEnv []corev1.EnvVar, outter 
 			Replicas: &replicas,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels:      map[string]string{"paddle-job-pserver": job.ObjectMeta.Name, "priority": job.Spec.Annotations.Priority},
+					Labels:      map[string]string{PserverLabel: job.ObjectMeta.Name, "priority": job.Spec.Annotations.Priority},
 					Annotations: map[string]string{"scheduling.k8s.io/group-name": job.Spec.PodGroupName},
 				},
 				Spec: corev1.PodSpec{
@@ -121,7 +124,7 @@ func parseToPserver(job *paddlev1.TrainingJob, extraEnv []corev1.EnvVar, outter 
 					Volumes:       job.Spec.Volumes,
 					Containers: []corev1.Container{
 						corev1.Container{
-							Name:            "pserver",
+							Name:            string(PSERVER),
 							Image:           job.Spec.Image,
 							Ports:           podPorts(job, PSERVER),
 							Env:             envs,
@@ -186,10 +189,11 @@ func parseToTrainer(job *paddlev1.TrainingJob, extraEnv []corev1.EnvVar, outter 
 		},
 		Spec: batchv1.JobSpec{
 			BackoffLimit: &backoffLimit,
+			Completions:  &replicas,
 			Parallelism:  &replicas,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{"paddle-job": job.ObjectMeta.Name,
+					Labels: map[string]string{TrainerLabel: job.ObjectMeta.Name,
 						"priority": job.Spec.Annotations.Priority},
 					Annotations: map[string]string{"scheduling.k8s.io/group-name": job.Spec.PodGroupName, "priority": job.Spec.Annotations.Priority},
 				},
@@ -198,7 +202,7 @@ func parseToTrainer(job *paddlev1.TrainingJob, extraEnv []corev1.EnvVar, outter 
 					Volumes:       job.Spec.Volumes,
 					Containers: []corev1.Container{
 						corev1.Container{
-							Name:            "trainer",
+							Name:            string(TRAINER),
 							Image:           job.Spec.Image,
 							ImagePullPolicy: imagePullPolicy,
 							VolumeMounts:    job.Spec.VolumeMounts,
@@ -296,7 +300,8 @@ func parseToMaster(job *paddlev1.TrainingJob) *v1beta1.ReplicaSet {
 			Replicas: &replicas,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels:      map[string]string{"paddle-job-master": job.ObjectMeta.Name, "priority": job.Spec.Annotations.Priority},
+					Labels: map[string]string{MasterLabel: job.ObjectMeta.Name,
+						"priority": job.Spec.Annotations.Priority},
 					Annotations: map[string]string{"scheduling.k8s.io/group-name": job.Spec.PodGroupName},
 				},
 				Spec: corev1.PodSpec{
@@ -304,7 +309,7 @@ func parseToMaster(job *paddlev1.TrainingJob) *v1beta1.ReplicaSet {
 					Volumes:       job.Spec.Volumes,
 					Containers: []corev1.Container{
 						corev1.Container{
-							Name:            "master",
+							Name:            string(MASTER),
 							Image:           job.Spec.Image,
 							ImagePullPolicy: imagePullPolicy,
 							Ports:           masterPorts(job),
