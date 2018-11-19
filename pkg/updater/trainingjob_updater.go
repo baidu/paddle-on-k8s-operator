@@ -90,12 +90,12 @@ func (j *JobUpdater) FullName() string {
 
 // IsReleased returns if tj has released resource
 func (j *JobUpdater) IsReleased() bool {
-	return j.Job.Released
+	return j.Job.Status.Released
 }
 
 // SetReleased set resource of job released
 func (j *JobUpdater) SetReleased(release bool) {
-	j.Job.Released = true
+	j.Job.Status.Released = true
 }
 
 func (j *JobUpdater) masterName() string {
@@ -162,8 +162,8 @@ func (j *JobUpdater) Reconcile() error {
 		j.status.Reason = reason
 
 		if phase == paddlev1.TrainingJobPhaseRunning {
-			j.Job.StartTime = time.Now()
-			log.Info("Job started", "job", j.FullName(), "time", j.Job.StartTime.Format("2018-01-01 23:00:00"))
+			j.Job.Status.StartTime = v1.NewTime(time.Now())
+			log.Info("Job started", "job", j.FullName(), "time", j.Job.Status.StartTime.Format("2018-01-01 23:00:00"))
 		}
 
 		if err := j.updateCRDStatus(released); err != nil {
@@ -392,12 +392,12 @@ func (j *JobUpdater) GetStatus() (paddlev1.TrainingJobPhase, string, error) {
 
 	timeLimit := int64(j.Job.Spec.Annotations.Walltime)
 	currentTime := time.Now()
-	if timeLimit != 0 && trainers.Status.Active != 0 && !j.Job.StartTime.IsZero() {
-		if int64((currentTime.Sub(j.Job.StartTime)).Seconds()) > timeLimit {
+	if timeLimit != 0 && trainers.Status.Active != 0 && !j.Job.Status.StartTime.IsZero() {
+		if int64((currentTime.Sub(j.Job.Status.StartTime.Time)).Seconds()) > timeLimit {
 			phase = paddlev1.TrainingJobPhaseTimeout
 			reason = "timeout!"
 			log.Warn("Job started", "job", j.Job.Name, "start time",
-				j.Job.StartTime.Format("2018-01-01 23:00:00"), "current time",
+				j.Job.Status.StartTime.Format("2018-01-01 23:00:00"), "current time",
 				currentTime.Format("2018-01-01 23:00:00"), "timeLimit", timeLimit)
 		}
 	}

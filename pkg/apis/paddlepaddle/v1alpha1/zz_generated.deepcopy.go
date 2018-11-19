@@ -530,6 +530,7 @@ func (in *TrainingJobStatus) DeepCopyInto(out *TrainingJobStatus) {
 			}
 		}
 	}
+	in.StartTime.DeepCopyInto(&out.StartTime)
 	return
 }
 
