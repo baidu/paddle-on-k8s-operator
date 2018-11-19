@@ -2,8 +2,6 @@ package v1alpha1
 
 import (
 	"fmt"
-	"time"
-
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/api/extensions/v1beta1"
@@ -35,12 +33,10 @@ func CRDName() string {
 
 // TrainingJob is a specification for a TrainingJob resource
 type TrainingJob struct {
-	metav1.TypeMeta             `json:",inline"`
-	metav1.ObjectMeta           `json:"metadata,omitempty"`
-	Spec      TrainingJobSpec   `json:"spec"`
-	Status    TrainingJobStatus `json:"status"`
-	StartTime time.Time         `json:"startTime"`
-	Released  bool              `json:"released"`
+	metav1.TypeMeta          `json:",inline"`
+	metav1.ObjectMeta        `json:"metadata,omitempty"`
+	Spec   TrainingJobSpec   `json:"spec"`
+	Status TrainingJobStatus `json:"status"`
 }
 
 // TrainingJobSpec is the spec for a TrainingJob resource
@@ -238,6 +234,10 @@ type TrainingJobStatus struct {
 	// ReplicaStatuses is detail status of resources
 	// TODO(ZhengQi): should we only considered trainer job now?
 	ReplicaStatuses []*TrainingResourceStatus `json:"replica_statuses"`
+	// StartTime marks when the trainingjob is Running
+	StartTime metav1.Time `json:"startTime"`
+	// Released marks resource have been released
+	Released bool `json:"released"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
