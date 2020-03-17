@@ -2,6 +2,7 @@ package v1alpha1
 
 import (
 	"fmt"
+
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/api/extensions/v1beta1"
@@ -33,10 +34,10 @@ func CRDName() string {
 
 // TrainingJob is a specification for a TrainingJob resource
 type TrainingJob struct {
-	metav1.TypeMeta          `json:",inline"`
-	metav1.ObjectMeta        `json:"metadata,omitempty"`
-	Spec   TrainingJobSpec   `json:"spec"`
-	Status TrainingJobStatus `json:"status"`
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+	Spec              TrainingJobSpec   `json:"spec"`
+	Status            TrainingJobStatus `json:"status"`
 }
 
 // TrainingJobSpec is the spec for a TrainingJob resource
@@ -251,6 +252,7 @@ type TrainingJobList struct {
 	Items []TrainingJob `json:"items"`
 }
 
+//Annotations that offering additional metadata.
 type Annotations struct {
 	Usergroupid string `json:"usergroupid"`
 	Userid      string `json:"userid"`
@@ -259,20 +261,25 @@ type Annotations struct {
 	Walltime    int    `json:"walltime"`
 }
 
+//Framework which operator support.
 type Framework struct {
 	Name FrameworkName `json:"name"`
 	Type JobType       `json:"type"`
 }
 
+//FrameworkName that operator support.
 type FrameworkName string
 
+//Framework name const.
 const (
 	Paddle     FrameworkName = "paddle"
 	TensorFlow               = "tensorflow"
 )
 
+//JobType that operator support.
 type JobType string
 
+//Job type const.
 const (
 	Local JobType = "local"
 	Nccl2         = "nccl2"

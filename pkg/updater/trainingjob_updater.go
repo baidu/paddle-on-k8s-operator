@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
-	"time"
 	"strings"
+	"time"
 
 	"github.com/golang/glog"
 	log "github.com/inconshreveable/log15"
@@ -239,7 +239,7 @@ func (j *JobUpdater) Reconcile() error {
 	}
 
 	podsList, err := j.kubeCli.CoreV1().Pods(j.Job.Namespace).List(v1.
-	ListOptions{LabelSelector: PserverLabel + "=" + j.
+		ListOptions{LabelSelector: PserverLabel + "=" + j.
 		Job.Name})
 	if err != nil {
 		return err
